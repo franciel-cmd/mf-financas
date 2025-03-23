@@ -9,7 +9,7 @@ import { applySecurityHeaders } from './config/csp'
 import 'react-toastify/dist/ReactToastify.css'
 import './styles/global.css'
 
-// Aplicar cabeçalhos de segurança
+// Aplicar cabeçalhos de segurança com configuração atualizada
 applySecurityHeaders();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

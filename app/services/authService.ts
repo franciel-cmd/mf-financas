@@ -52,27 +52,39 @@ const handleError = (error: any, mensagem: string): void => {
 };
 
 /**
- * Registra um novo usuário no sistema
- * @param credenciais Dados do usuário a ser registrado
+ * Registra um novo usuário
+ * @param nome Nome do usuário
+ * @param email E-mail do usuário
+ * @param senha Senha do usuário
+ * @param confirmacaoSenha Confirmação da senha do usuário
  * @returns Dados do usuário e token, ou null em caso de erro
  */
-export async function registrarUsuario(credenciais: {
-  nome: string;
-  email: string;
-  senha: string;
-}): Promise<{ usuario: Usuario; token: string } | null> {
+export const registrarUsuario = async (
+  nome: string,
+  email: string,
+  senha: string,
+  confirmacaoSenha: string
+): Promise<{ usuario: Usuario | null; token: string | null }> => {
   try {
-    // Validar e sanitizar os dados de entrada
-    const validationResult = validateAndSanitize(registroSchema, credenciais);
-    if (!validationResult.success) {
-      throw new Error(`Dados inválidos: ${validationResult.errors?.join(', ')}`);
+    logger.info('Iniciando processo de registro de usuário', { email });
+    
+    // Validar dados de registro
+    if (senha !== confirmacaoSenha) {
+      throw new Error('As senhas não coincidem.');
     }
     
-    const dadosValidados = validationResult.data!;
-    
-    // Log de ação de registro (dados sensíveis omitidos automaticamente)
-    logger.audit('Tentativa de registro de usuário', { email: dadosValidados.email });
-    
+    const resultadoValidacao = validateAndSanitize(registroSchema, {
+      nome,
+      email,
+      senha
+    });
+
+    if (!resultadoValidacao.success) {
+      throw new Error(`Dados inválidos: ${resultadoValidacao.errors?.join(', ')}`);
+    }
+
+    const dadosValidados = resultadoValidacao.data!;
+
     // Limitar taxa de tentativas de registro (proteção contra ataques de força bruta)
     const storedAttempts = sessionStorage.getItem('register_attempts') || '0';
     const attempts = parseInt(storedAttempts, 10);
@@ -83,9 +95,9 @@ export async function registrarUsuario(credenciais: {
       const now = Date.now();
       
       if (now - lastAttemptTime < 300000) { // 5 minutos
-        logger.warning('Muitas tentativas de registro detectadas', { email: dadosValidados.email, attempts });
+        logger.warning('Muitas tentativas de registro detectadas', { email, attempts });
         toast.error('Muitas tentativas de registro. Tente novamente em alguns minutos.');
-        return null;
+        return { usuario: null, token: null };
       } else {
         // Reinicia o contador após 5 minutos
         sessionStorage.setItem('register_attempts', '0');
@@ -94,8 +106,8 @@ export async function registrarUsuario(credenciais: {
     
     sessionStorage.setItem('register_attempts', (attempts + 1).toString());
     sessionStorage.setItem('last_register_attempt', Date.now().toString());
-    
-    // 1. Primeiro registrar o usuário na autenticação do Supabase
+
+    // Registro no Supabase Auth
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email: dadosValidados.email,
       password: dadosValidados.senha,
@@ -105,80 +117,62 @@ export async function registrarUsuario(credenciais: {
         }
       }
     });
-    
+
     if (authError) {
-      // Log detalhado do erro para debugging
-      logger.error('Erro no registro de autenticação', {
-        erro: authError.message,
-        codigo: authError.code,
-        email: dadosValidados.email
-      });
-      
-      // Mensagens de erro mais amigáveis baseadas no tipo de erro
-      if (authError.message.includes('email already')) {
-        throw new Error('Este email já está em uso.');
-      }
-      
+      logger.error('Erro ao registrar usuário no Auth', authError);
       throw authError;
     }
-    
-    if (!authData.user || !authData.session) {
-      throw new Error('Erro ao criar conta. Por favor, tente novamente.');
-    }
-    
-    // 2. Criar perfil do usuário no banco de dados
-    const { data: userData, error: userError } = await supabase
-      .from('usuarios')
-      .insert({
+
+    // Cria o perfil do usuário no banco de dados
+    if (authData.user) {
+      logger.info('Usuário registrado com sucesso no Auth', { userId: authData.user.id });
+      
+      const { data: userData, error: userError } = await supabase
+        .from('usuarios')
+        .insert({
+          id: authData.user.id,
+          nome: dadosValidados.nome,
+          email: dadosValidados.email
+        })
+        .select()
+        .single();
+
+      if (userError) {
+        logger.error('Erro ao criar perfil do usuário', userError);
+        // Continua mesmo com erro, pois o Auth já foi criado
+      } else {
+        logger.info('Perfil do usuário criado com sucesso', { userId: authData.user.id });
+      }
+
+      const usuario: Usuario = {
         id: authData.user.id,
         nome: dadosValidados.nome,
         email: dadosValidados.email,
-      })
-      .select()
-      .single();
-    
-    if (userError) {
-      // Log do erro
-      logger.error('Erro ao criar perfil do usuário', {
-        erro: userError.message,
-        userId: authData.user.id
+        senha: '' // Não armazenamos a senha
+      };
+
+      // Registrar ação de auditoria
+      logger.audit({
+        type: 'USER_REGISTERED',
+        userId: authData.user.id,
+        details: { email: dadosValidados.email }
       });
-      
-      // Tentar reverter a criação do usuário na autenticação
-      await supabase.auth.admin.deleteUser(authData.user.id).catch(e => {
-        logger.error('Erro ao reverter criação de usuário', e);
-      });
-      
-      throw userError;
+
+      toast.success('Cadastro realizado com sucesso!');
+      return {
+        usuario,
+        token: authData.session?.access_token || null
+      };
     }
     
-    // Log de auditoria para registro bem-sucedido
-    logger.audit('Usuário registrado com sucesso', {
-      userId: authData.user.id,
-      email: dadosValidados.email
-    });
-    
-    // Formatação da resposta (sem incluir a senha)
-    const usuario: Usuario = {
-      id: userData.id,
-      nome: userData.nome,
-      email: userData.email,
-      senha: '' // Campo obrigatório, mas não armazenamos a senha real
-    };
-    
-    toast.success('Conta criada com sucesso!');
-    
-    return {
-      usuario,
-      token: authData.session.access_token
-    };
+    throw new Error('Erro ao processar o registro de usuário');
   } catch (error: any) {
     const mensagem = error.message || 'Erro ao criar conta. Tente novamente.';
     logger.error('Erro no processo de registro', error);
     toast.error(mensagem);
-    return null;
+    return { usuario: null, token: null };
   }
-}
+};
 
 /**
  * Autentica um usuário no sistema

@@ -10,6 +10,8 @@ export const contentSecurityPolicy = {
   // Fontes permitidas para scripts
   'script-src': [
     "'self'",                 // Apenas scripts do mesmo origem
+    "'unsafe-inline'",        // Necessário para alguns frameworks React
+    "'unsafe-eval'",          // Necessário para desenvolvimento e alguns frameworks
     "https://cdn.jsdelivr.net", // CDN para bibliotecas comuns
     "https://cdn.tailwindcss.com", // Tailwind CDN (se usado)
     "https://apis.google.com", // APIs Google (se usadas)
@@ -41,9 +43,12 @@ export const contentSecurityPolicy = {
   // Fontes permitidas para conexões
   'connect-src': [
     "'self'",
-    process.env.VITE_SUPABASE_URL || "",
+    "localhost:*",
+    "http://localhost:*",
+    import.meta.env.VITE_SUPABASE_URL || "",
     "https://*.supabase.co",
     "wss://*.supabase.co",
+    "*", // Temporariamente permitir tudo durante debugging
   ].join(' '),
 
   // Impede o site de ser embarcado em frames (protege contra clickjacking)

@@ -77,16 +77,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
   async function login(credenciais: CredenciaisLogin): Promise<boolean> {
     setLoading(true);
     try {
-      const { usuario, token } = await loginUsuario(credenciais);
+      const result = await loginUsuario(credenciais);
       
-      if (!usuario || !token) {
+      if (!result) {
         setLoading(false);
         return false;
       }
-
+      
       setAuthData({
-        token,
-        usuario,
+        token: result.token,
+        usuario: result.usuario,
         isAuthenticated: true
       });
       
@@ -124,16 +124,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
   ): Promise<boolean> {
     setLoading(true);
     try {
-      const { usuario, token } = await registrarUsuario(nome, email, senha, confirmacaoSenha);
+      const result = await registrarUsuario(nome, email, senha, confirmacaoSenha);
       
-      if (!usuario || !token) {
+      if (!result.usuario || !result.token) {
         setLoading(false);
         return false;
       }
 
       setAuthData({
-        token,
-        usuario,
+        token: result.token,
+        usuario: result.usuario,
         isAuthenticated: true
       });
       
