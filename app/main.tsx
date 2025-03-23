@@ -4,13 +4,16 @@ import { HashRouter } from 'react-router-dom'
 import App from './App'
 import { FinancasProvider } from './context/FinancasContext'
 import { AuthProvider } from './context/AuthContext'
-import { ToastContainer } from 'react-toastify'
+import { ToastContainer, toast } from 'react-toastify'
 // import { applySecurityHeaders } from './config/csp'
 import 'react-toastify/dist/ReactToastify.css'
 import './styles/global.css'
 
 // Desativando CSP completamente durante debugging
 // applySecurityHeaders();
+
+// Limpar todas as notificações toast ao iniciar
+toast.dismiss();
 
 // Handler global para capturar e mostrar erros não tratados
 window.addEventListener('error', (event) => {
@@ -120,7 +123,19 @@ try {
           <AuthProvider>
             <FinancasProvider>
               <App />
-              <ToastContainer position="top-right" autoClose={3000} />
+              <ToastContainer 
+                position="top-right" 
+                autoClose={3000} 
+                hideProgressBar={false}
+                newestOnTop={true}
+                closeOnClick
+                rtl={false}
+                pauseOnFocusLoss={false}
+                draggable
+                pauseOnHover
+                theme="light"
+                limit={3}
+              />
             </FinancasProvider>
           </AuthProvider>
         </HashRouter>

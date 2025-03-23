@@ -1,4 +1,6 @@
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, useLocation } from 'react-router-dom';
+import { useEffect } from 'react';
+import { toast } from 'react-toastify';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import Contas from './pages/Contas';
@@ -12,6 +14,13 @@ import Login from './pages/Login';
 import PrivateRoute from './components/PrivateRoute';
 
 function App() {
+  const location = useLocation();
+
+  // Limpar todas as notificações toast quando a rota mudar
+  useEffect(() => {
+    toast.dismiss();
+  }, [location.pathname]);
+
   return (
     <Routes>
       {/* Rotas públicas */}
