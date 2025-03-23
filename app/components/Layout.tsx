@@ -6,6 +6,10 @@ import styled from 'styled-components';
 const LayoutContainer = styled.div`
   display: flex;
   min-height: 100vh;
+  
+  @media (max-width: 768px) {
+    flex-direction: column;
+  }
 `;
 
 const Sidebar = styled.aside`
@@ -13,6 +17,13 @@ const Sidebar = styled.aside`
   background-color: var(--surface);
   border-right: 1px solid var(--border);
   padding: 2rem 0;
+  
+  @media (max-width: 768px) {
+    width: 100%;
+    padding: 1rem 0;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
 `;
 
 const Logo = styled.div`
@@ -26,10 +37,20 @@ const Logo = styled.div`
 
 const NavList = styled.ul`
   list-style: none;
+  
+  @media (max-width: 768px) {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
 `;
 
 const NavItem = styled.li`
   margin-bottom: 0.5rem;
+  
+  @media (max-width: 768px) {
+    margin: 0 0.25rem 0.5rem;
+  }
 `;
 
 const StyledNavLink = styled(NavLink)`
@@ -53,6 +74,17 @@ const StyledNavLink = styled(NavLink)`
   svg {
     margin-right: 0.75rem;
   }
+  
+  @media (max-width: 768px) {
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
+    border-radius: 0.375rem;
+    
+    &.active {
+      border-right: none;
+      border-bottom: 2px solid var(--primary);
+    }
+  }
 `;
 
 const MainContent = styled.main`
@@ -60,6 +92,10 @@ const MainContent = styled.main`
   padding: 2rem;
   background-color: var(--background);
   overflow-y: auto;
+  
+  @media (max-width: 768px) {
+    padding: 1rem;
+  }
 `;
 
 const NavSection = styled.div`
@@ -71,6 +107,15 @@ const NavSection = styled.div`
     color: var(--text-secondary);
     padding: 0 1.5rem;
     margin-bottom: 0.5rem;
+  }
+  
+  @media (max-width: 768px) {
+    margin-bottom: 1rem;
+    
+    h3 {
+      text-align: center;
+      padding: 0 1rem;
+    }
   }
 `;
 
@@ -96,22 +141,22 @@ export default function Layout() {
             </NavItem>
             <NavItem>
               <StyledNavLink to="/contas/em-aberto">
-                <FiCalendar size={18} /> Contas em Aberto
+                <FiCalendar size={18} /> Em Aberto
               </StyledNavLink>
             </NavItem>
             <NavItem>
               <StyledNavLink to="/contas/pagas">
-                <FiCheckCircle size={18} /> Contas Pagas
+                <FiCheckCircle size={18} /> Pagas
               </StyledNavLink>
             </NavItem>
             <NavItem>
               <StyledNavLink to="/contas/vencidas">
-                <FiAlertCircle size={18} /> Contas Vencidas
+                <FiAlertCircle size={18} /> Vencidas
               </StyledNavLink>
             </NavItem>
             <NavItem>
               <StyledNavLink to="/contas/cadastrar">
-                <FiPlusCircle size={18} /> Cadastrar Conta
+                <FiPlusCircle size={18} /> Cadastrar
               </StyledNavLink>
             </NavItem>
           </NavSection>

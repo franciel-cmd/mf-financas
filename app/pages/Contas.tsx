@@ -11,6 +11,12 @@ const ContasHeader = styled.div`
   justify-content: space-between;
   align-items: center;
   margin-bottom: 1.5rem;
+  
+  @media (max-width: 576px) {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+  }
 `;
 
 const ContasTitulo = styled.h1`
@@ -21,6 +27,11 @@ const ContasTitulo = styled.h1`
 const ContasAcoes = styled.div`
   display: flex;
   gap: 0.5rem;
+  
+  @media (max-width: 576px) {
+    width: 100%;
+    justify-content: space-between;
+  }
 `;
 
 const ContasEmpty = styled.div`

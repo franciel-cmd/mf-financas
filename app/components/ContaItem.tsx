@@ -26,6 +26,11 @@ const ContaHeader = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
+  
+  @media (max-width: 576px) {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
 `;
 
 const ContaNome = styled.h3`
@@ -43,11 +48,20 @@ const ContaValor = styled.div`
 const ContaInfo = styled.div`
   display: flex;
   gap: 1.5rem;
+  
+  @media (max-width: 576px) {
+    flex-wrap: wrap;
+    gap: 1rem;
+  }
 `;
 
 const InfoItem = styled.div`
   display: flex;
   flex-direction: column;
+  
+  @media (max-width: 576px) {
+    min-width: calc(50% - 0.5rem);
+  }
   
   span:first-child {
     font-size: 0.75rem;
@@ -91,11 +105,15 @@ const StatusTag = styled.span<{ status: string }>`
   }};
 `;
 
-const AcoesConta = styled.div`
+const ContaAcoes = styled.div`
   display: flex;
-  justify-content: flex-end;
   gap: 0.5rem;
   margin-top: 0.5rem;
+  
+  @media (max-width: 576px) {
+    justify-content: space-between;
+    width: 100%;
+  }
 `;
 
 const BotaoAcao = styled.button`
@@ -217,7 +235,7 @@ export function ContaItem({ conta }: ContaItemProps) {
         </InfoItem>
       )}
       
-      <AcoesConta>
+      <ContaAcoes>
         {conta.status !== 'paga' && (
           <BotaoAcao 
             className="pagar"
@@ -246,7 +264,7 @@ export function ContaItem({ conta }: ContaItemProps) {
         >
           <FiTrash2 size={18} />
         </BotaoAcao>
-      </AcoesConta>
+      </ContaAcoes>
     </ContaCard>
   );
 } 

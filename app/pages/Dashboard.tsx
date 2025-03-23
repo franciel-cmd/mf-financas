@@ -39,6 +39,12 @@ const CardHeader = styled.div`
     color: var(--text-primary);
     margin: 0;
   }
+  
+  @media (max-width: 576px) {
+    h2 {
+      font-size: 1.1rem;
+    }
+  }
 `;
 
 const CardValue = styled.div<{ color?: string }>`
@@ -66,6 +72,12 @@ const ListHeader = styled.div`
   justify-content: space-between;
   align-items: center;
   margin-bottom: 1.5rem;
+  
+  @media (max-width: 576px) {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.75rem;
+  }
   
   h2 {
     font-size: 1.25rem;

@@ -9,6 +9,12 @@ const RelatoriosHeader = styled.div`
   justify-content: space-between;
   align-items: center;
   margin-bottom: 1.5rem;
+  
+  @media (max-width: 576px) {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+  }
 `;
 
 const RelatoriosTitulo = styled.h1`
@@ -26,6 +32,11 @@ const RelatoriosTitulo = styled.h1`
 const RelatoriosAcoes = styled.div`
   display: flex;
   gap: 0.5rem;
+  
+  @media (max-width: 576px) {
+    width: 100%;
+    justify-content: flex-end;
+  }
 `;
 
 const FiltroRelatorio = styled.div`
@@ -38,6 +49,11 @@ const FiltroRelatorio = styled.div`
 const FiltroForm = styled.form`
   display: flex;
   gap: 1rem;
+  
+  @media (max-width: 768px) {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
 `;
 
 const FiltroGrupo = styled.div`
