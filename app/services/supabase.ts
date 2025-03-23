@@ -5,11 +5,16 @@ import { createClient } from '@supabase/supabase-js';
 // Verificar se estamos em modo de desenvolvimento ou produção
 const isDevelopment = process.env.NODE_ENV === 'development';
 
+// Valores de backup diretos para caso as variáveis de ambiente falhem
+const BACKUP_URL = 'https://jtsbmolnhlrpyxccwpul.supabase.co';
+const BACKUP_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp0c2Jtb2xuaGxycHl4Y2N3cHVsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MDAwNTM2NzQsImV4cCI6MjAxNTYyOTY3NH0.NmThbvLbEmhJQmb0Jz98YQkpPNFbxDneMgQQ1l9ueoc';
+
 // Obter as variáveis de ambiente
 let supabaseUrl = '';
 let supabaseAnonKey = '';
 
 try {
+  // Tentar obter das variáveis de ambiente primeiro
   supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
   supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
   
@@ -19,20 +24,61 @@ try {
   console.log('KEY:', supabaseAnonKey ? 'Configurada' : 'NÃO CONFIGURADA');
   console.log('Ambiente:', isDevelopment ? 'Desenvolvimento' : 'Produção');
 
-  if (!supabaseUrl || !supabaseAnonKey) {
-    console.error('Supabase URL e/ou Chave Anônima não definidos!');
+  // Se não obteve das variáveis de ambiente, usar os valores de backup
+  if (!supabaseUrl) {
+    console.warn('Usando URL de backup para Supabase!');
+    supabaseUrl = BACKUP_URL;
+  }
+  
+  if (!supabaseAnonKey) {
+    console.warn('Usando KEY de backup para Supabase!');
+    supabaseAnonKey = BACKUP_KEY;
   }
 } catch (error) {
   console.error('Erro ao acessar variáveis de ambiente:', error);
+  // Usar valores de backup em caso de erro
+  supabaseUrl = BACKUP_URL;
+  supabaseAnonKey = BACKUP_KEY;
+  console.warn('Usando valores de backup para Supabase após erro!');
 }
 
+console.log('Conectando ao Supabase com: ', {
+  url: supabaseUrl ? supabaseUrl.substring(0, 15) + '...' : 'vazio',
+  keyDefinida: supabaseAnonKey ? 'Sim' : 'Não'
+});
+
 // Criar cliente Supabase
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true
+  }
+});
 
 // Verificar conexão
 supabase.auth.onAuthStateChange((event, session) => {
   console.log('Estado de autenticação do Supabase:', event, session ? 'Sessão ativa' : 'Sem sessão');
 });
+
+// Função de teste para verificar conexão ao Supabase
+export const testarConexaoSupabase = async () => {
+  try {
+    const { data, error } = await supabase.from('usuarios').select('count()', { count: 'exact' }).limit(1);
+    if (error) {
+      console.error('Erro ao testar conexão com Supabase:', error);
+      return false;
+    }
+    console.log('Conexão com Supabase bem-sucedida!');
+    return true;
+  } catch (err) {
+    console.error('Exceção ao testar conexão com Supabase:', err);
+    return false;
+  }
+};
+
+// Tentar verificar a conexão ao inicializar
+testarConexaoSupabase();
 
 // Tipos para uso com TypeScript
 export type Tables = {

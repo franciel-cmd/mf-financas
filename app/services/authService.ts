@@ -5,6 +5,7 @@ import { credenciaisLoginSchema, registroUsuarioSchema, validar } from '../schem
 import { logger } from '../utils/logger';
 import { validateAndSanitize, commonSchemas, sanitizeString } from '../utils/validators';
 import { z } from 'zod';
+import { v4 as uuidv4 } from 'uuid';
 
 // Esquema de validação para as credenciais de registro
 const registroSchema = z.object({
@@ -66,7 +67,7 @@ export const registrarUsuario = async (
   confirmacaoSenha: string
 ): Promise<{ usuario: Usuario | null; token: string | null }> => {
   try {
-    logger.info('Iniciando processo de registro de usuário', { email });
+    console.log('Iniciando registro de usuário:', email);
     
     // Validar dados de registro
     if (senha !== confirmacaoSenha) {
@@ -119,56 +120,75 @@ export const registrarUsuario = async (
     });
 
     if (authError) {
-      logger.error('Erro ao registrar usuário no Auth', authError);
-      throw authError;
+      console.error('Erro ao registrar usuário no Auth:', authError);
+      
+      // Mensagens de erro mais amigáveis
+      if (authError.message.includes('already registered')) {
+        toast.error('Este e-mail já está registrado. Por favor, tente fazer login.');
+      } else {
+        toast.error(`Erro ao registrar: ${authError.message}`);
+      }
+      
+      return { usuario: null, token: null };
     }
+
+    if (!authData.user) {
+      console.error('Usuário não retornado após registro');
+      toast.error('Erro ao criar conta. Por favor, tente novamente.');
+      return { usuario: null, token: null };
+    }
+
+    console.log('Usuário registrado no Auth com sucesso');
 
     // Cria o perfil do usuário no banco de dados
-    if (authData.user) {
-      logger.info('Usuário registrado com sucesso no Auth', { userId: authData.user.id });
-      
-      const { data: userData, error: userError } = await supabase
-        .from('usuarios')
-        .insert({
-          id: authData.user.id,
-          nome: dadosValidados.nome,
-          email: dadosValidados.email
-        })
-        .select()
-        .single();
-
-      if (userError) {
-        logger.error('Erro ao criar perfil do usuário', userError);
-        // Continua mesmo com erro, pois o Auth já foi criado
-      } else {
-        logger.info('Perfil do usuário criado com sucesso', { userId: authData.user.id });
-      }
-
-      const usuario: Usuario = {
+    const { data: userData, error: userError } = await supabase
+      .from('usuarios')
+      .insert({
         id: authData.user.id,
         nome: dadosValidados.nome,
-        email: dadosValidados.email,
-        senha: '' // Não armazenamos a senha
-      };
+        email: dadosValidados.email
+      })
+      .select()
+      .single();
 
-      // Registrar ação de auditoria
-      logger.audit({
-        type: 'USER_REGISTERED',
-        userId: authData.user.id,
-        details: { email: dadosValidados.email }
-      });
-
-      toast.success('Cadastro realizado com sucesso!');
-      return {
-        usuario,
-        token: authData.session?.access_token || null
-      };
+    if (userError) {
+      console.error('Erro ao criar perfil do usuário:', userError);
+      toast.error(`Erro ao criar perfil: ${userError.message}`);
+      
+      // Tentar excluir o usuário Auth já que o perfil falhou
+      try {
+        await supabase.auth.admin.deleteUser(authData.user.id);
+      } catch (e) {
+        console.error('Erro ao remover usuário Auth após falha no perfil:', e);
+      }
+      
+      return { usuario: null, token: null };
     }
+
+    console.log('Perfil de usuário criado com sucesso');
     
-    throw new Error('Erro ao processar o registro de usuário');
+    const usuario: Usuario = {
+      id: authData.user.id,
+      nome: dadosValidados.nome,
+      email: dadosValidados.email,
+      senha: '' // Não armazenamos a senha
+    };
+
+    // Registrar ação de auditoria
+    logger.audit({
+      type: 'USER_REGISTERED',
+      userId: authData.user.id,
+      details: { email: dadosValidados.email }
+    });
+
+    toast.success('Cadastro realizado com sucesso!');
+    return {
+      usuario,
+      token: authData.session?.access_token || null
+    };
   } catch (error: any) {
     const mensagem = error.message || 'Erro ao criar conta. Tente novamente.';
-    logger.error('Erro no processo de registro', error);
+    console.error('Exceção não tratada ao registrar usuário:', error);
     toast.error(mensagem);
     return { usuario: null, token: null };
   }
@@ -179,8 +199,12 @@ export const registrarUsuario = async (
  * @param credenciais Credenciais de login (email e senha)
  * @returns Dados do usuário e token, ou null em caso de erro
  */
-export async function loginUsuario(credenciais: CredenciaisLogin): Promise<{ usuario: Usuario; token: string } | null> {
+export const loginUsuario = async (
+  credenciais: CredenciaisLogin
+): Promise<{ usuario: Usuario | null; token: string | null }> => {
   try {
+    console.log('Iniciando login de usuário:', credenciais.email);
+    
     // Validar e sanitizar os dados de entrada
     const validationResult = validateAndSanitize(loginSchema, credenciais);
     if (!validationResult.success) {
@@ -204,7 +228,7 @@ export async function loginUsuario(credenciais: CredenciaisLogin): Promise<{ usu
       if (now - lastAttemptTime < 300000) { // 5 minutos
         logger.warning('Muitas tentativas de login detectadas', { email: dadosValidados.email, attempts });
         toast.error('Muitas tentativas de login. Tente novamente em alguns minutos.');
-        return null;
+        return { usuario: null, token: null };
       } else {
         // Reinicia o contador após 5 minutos
         sessionStorage.setItem('login_attempts', '0');
@@ -221,25 +245,26 @@ export async function loginUsuario(credenciais: CredenciaisLogin): Promise<{ usu
     });
     
     if (authError) {
-      // Log detalhado do erro para debugging
-      logger.error('Erro na autenticação', {
-        erro: authError.message,
-        codigo: authError.code,
-        email: dadosValidados.email
-      });
+      console.error('Erro ao fazer login:', authError);
       
-      // Mensagem de erro amigável baseada no tipo de erro
-      if (authError.message.includes('Invalid login')) {
-        throw new Error('Email ou senha incorretos.');
+      // Mensagens de erro mais amigáveis
+      if (authError.message.includes('Invalid login credentials')) {
+        toast.error('E-mail ou senha incorretos.');
+      } else {
+        toast.error(`Erro ao fazer login: ${authError.message}`);
       }
       
-      throw authError;
+      return { usuario: null, token: null };
     }
     
-    if (!authData.user || !authData.session) {
-      throw new Error('Erro na autenticação. Por favor, tente novamente.');
+    if (!authData.user) {
+      console.error('Usuário não retornado após login');
+      toast.error('Erro ao fazer login. Por favor, tente novamente.');
+      return { usuario: null, token: null };
     }
     
+    console.log('Autenticação bem-sucedida, buscando dados do usuário');
+
     // 2. Buscar dados do usuário no banco
     const { data: userData, error: userError } = await supabase
       .from('usuarios')
@@ -248,23 +273,18 @@ export async function loginUsuario(credenciais: CredenciaisLogin): Promise<{ usu
       .single();
     
     if (userError) {
-      logger.error('Erro ao buscar dados do usuário', {
-        erro: userError.message,
-        userId: authData.user.id
-      });
-      
-      throw userError;
+      console.error('Erro ao buscar dados do usuário:', userError);
+      toast.error('Erro ao recuperar informações do perfil.');
+      return { usuario: null, token: null };
     }
     
     if (!userData) {
-      throw new Error('Usuário não encontrado.');
+      console.error('Dados do usuário não encontrados');
+      toast.error('Perfil não encontrado. Por favor, contate o suporte.');
+      return { usuario: null, token: null };
     }
     
-    // Log de auditoria para login bem-sucedido
-    logger.audit('Login bem-sucedido', {
-      userId: authData.user.id,
-      email: userData.email
-    });
+    console.log('Login completo com sucesso');
     
     // Aplicar sanitização adicional aos dados do usuário
     const usuario: Usuario = {
@@ -274,7 +294,7 @@ export async function loginUsuario(credenciais: CredenciaisLogin): Promise<{ usu
       senha: '' // Campo obrigatório, mas não armazenamos a senha real
     };
     
-    toast.success(`Bem-vindo(a), ${usuario.nome}!`);
+    toast.success(`Bem-vindo(a) de volta, ${usuario.nome}!`);
     
     return {
       usuario,
@@ -282,41 +302,31 @@ export async function loginUsuario(credenciais: CredenciaisLogin): Promise<{ usu
     };
   } catch (error: any) {
     const mensagem = error.message || 'Erro ao fazer login. Tente novamente.';
-    logger.error('Erro no processo de login', error);
+    console.error('Exceção não tratada ao fazer login:', error);
     toast.error(mensagem);
-    return null;
+    return { usuario: null, token: null };
   }
-}
+};
 
 // Logout de usuário
 export const logoutUsuario = async (): Promise<boolean> => {
   try {
-    // Obter o usuário atual antes de fazer logout
-    const { data: sessionData } = await supabase.auth.getSession();
-    const userId = sessionData.session?.user?.id;
-    
-    logger.info('Iniciando processo de logout', { userId });
+    console.log('Iniciando logout');
     
     const { error } = await supabase.auth.signOut();
 
     if (error) {
-      handleError(error, 'Erro ao fazer logout');
+      console.error('Erro ao fazer logout:', error);
+      toast.error(`Erro ao sair: ${error.message}`);
       return false;
     }
 
-    if (userId) {
-      // Registrar ação de auditoria
-      logger.audit({
-        type: 'USER_LOGOUT',
-        userId
-      });
-    }
-
-    logger.info('Logout realizado com sucesso', { userId });
-    toast.info('Você saiu do sistema.');
+    console.log('Logout realizado com sucesso');
+    toast.success('Você saiu com sucesso!');
     return true;
   } catch (error) {
-    handleError(error, 'Erro ao fazer logout');
+    console.error('Exceção não tratada ao fazer logout:', error);
+    toast.error('Erro inesperado ao sair.');
     return false;
   }
 };
@@ -327,42 +337,62 @@ export const verificarAutenticacao = async (): Promise<{
   token: string | null;
 }> => {
   try {
-    logger.debug('Verificando autenticação');
+    console.log('Verificando autenticação');
     
-    const { data } = await supabase.auth.getSession();
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
 
-    if (data.session && data.session.user) {
-      logger.debug('Sessão encontrada', { userId: data.session.user.id });
-      
-      const { data: userData, error: userError } = await supabase
-        .from('usuarios')
-        .select('*')
-        .eq('id', data.session.user.id)
-        .single();
-
-      if (userError) {
-        handleError(userError, 'Erro ao buscar perfil do usuário');
-      }
-
-      const nome = userData?.nome || data.session.user.user_metadata?.nome || 'Usuário';
-
-      const usuario: Usuario = {
-        id: data.session.user.id,
-        nome,
-        email: data.session.user.email || '',
-        senha: '' // Não armazenamos a senha
-      };
-
-      return {
-        usuario,
-        token: data.session.access_token
-      };
+    if (sessionError) {
+      console.error('Erro ao verificar sessão:', sessionError);
+      return { usuario: null, token: null };
     }
 
-    logger.debug('Nenhuma sessão encontrada');
-    return { usuario: null, token: null };
+    if (!sessionData.session) {
+      console.log('Nenhuma sessão encontrada');
+      return { usuario: null, token: null };
+    }
+
+    const { user } = sessionData.session;
+    
+    if (!user) {
+      console.log('Sessão encontrada, mas sem usuário');
+      return { usuario: null, token: null };
+    }
+
+    console.log('Sessão ativa encontrada, buscando dados do usuário');
+
+    // 2. Buscar informações do usuário
+    const { data: usuarioData, error: usuarioError } = await supabase
+      .from('usuarios')
+      .select('*')
+      .eq('id', user.id)
+      .single();
+
+    if (usuarioError) {
+      console.error('Erro ao buscar dados do usuário após verificar autenticação:', usuarioError);
+      return { usuario: null, token: null };
+    }
+
+    if (!usuarioData) {
+      console.error('Dados do usuário não encontrados após verificar autenticação');
+      return { usuario: null, token: null };
+    }
+
+    console.log('Verificação de autenticação completa com sucesso');
+    
+    // Preparar objeto de usuário (sem senha)
+    const usuario: Usuario = {
+      id: usuarioData.id,
+      nome: usuarioData.nome,
+      email: usuarioData.email,
+      fotoPerfil: usuarioData.foto_perfil,
+    };
+
+    return { 
+      usuario, 
+      token: sessionData.session.access_token || null 
+    };
   } catch (error) {
-    handleError(error, 'Erro ao verificar autenticação');
+    console.error('Exceção não tratada ao verificar autenticação:', error);
     return { usuario: null, token: null };
   }
 }; 

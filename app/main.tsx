@@ -17,10 +17,35 @@ window.addEventListener('error', (event) => {
   console.error('Erro não tratado:', event.error);
 });
 
-// Handler para promessas rejeitadas não tratadas
+// Handler para promessas não tratadas
 window.addEventListener('unhandledrejection', (event) => {
-  console.error('Promessa rejeitada não tratada:', event.reason);
+  console.error('Promessa não tratada:', event.reason);
 });
+
+// Monitorar requisições de rede
+const originalFetch = window.fetch;
+window.fetch = function(...args) {
+  console.log('Fetch requisição:', args[0]);
+  
+  return originalFetch.apply(this, args)
+    .then(response => {
+      console.log('Fetch resposta:', args[0], response.status, response.statusText);
+      return response;
+    })
+    .catch(error => {
+      console.error('Fetch erro:', args[0], error);
+      // Adicionar mais informações de debug ao erro
+      if (error.message === 'Failed to fetch') {
+        console.error('Detalhes da requisição que falhou:', {
+          url: args[0],
+          options: args[1],
+          supabaseUrl: import.meta.env.VITE_SUPABASE_URL || 'Não configurado',
+          hasSupabaseKey: Boolean(import.meta.env.VITE_SUPABASE_ANON_KEY) ? 'Sim' : 'Não'
+        });
+      }
+      throw error;
+    });
+};
 
 // Componente para capturar erros em componentes React
 interface ErrorBoundaryProps {
