@@ -35,17 +35,11 @@ export interface Usuario {
   id: string;
   nome: string;
   email: string;
-  senha: string; // Em uma aplicação real, nunca armazenaria a senha em texto simples
+  senha?: string; // Marcado como opcional, mas na prática nunca será armazenada a senha em texto simples
   fotoPerfil?: string;
 }
 
 export interface CredenciaisLogin {
   email: string;
   senha: string;
-}
-
-export interface AuthState {
-  token: string;
-  usuario: Usuario;
-  isAuthenticated: boolean;
 } 

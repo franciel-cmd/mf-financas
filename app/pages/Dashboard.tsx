@@ -5,6 +5,7 @@ import { format, isAfter, isBefore, addDays, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { FiAlertCircle, FiCalendar, FiCheckCircle, FiFileText, FiPlusCircle } from 'react-icons/fi';
 import { useFinancas } from '../hooks/useFinancas';
+import { ExportacaoButtons } from '../components/ExportacaoButtons';
 
 const DashboardGrid = styled.div`
   display: grid;
@@ -226,6 +227,10 @@ export default function Dashboard() {
   return (
     <div>
       <h1 style={{ marginBottom: '1.5rem' }}>Dashboard</h1>
+      
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem' }}>
+        <ExportacaoButtons />
+      </div>
       
       <DashboardGrid>
         <Card>

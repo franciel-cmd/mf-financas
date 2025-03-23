@@ -1,14 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import styled from 'styled-components';
-import { FiBarChart2, FiDownload, FiPrinter } from 'react-icons/fi';
+import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
+import { FiBarChart2, FiFilter } from 'react-icons/fi';
 import { useFinancas } from '../hooks/useFinancas';
 import { CategoriaConta } from '../types';
+import { ExportacaoButtons } from '../components/ExportacaoButtons';
 
-const RelatoriosHeader = styled.div`
+const PageHeader = styled.div`
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1.5rem;
+  margin-bottom: 2rem;
   
   @media (max-width: 576px) {
     flex-direction: column;
@@ -17,9 +20,10 @@ const RelatoriosHeader = styled.div`
   }
 `;
 
-const RelatoriosTitulo = styled.h1`
-  font-size: 1.5rem;
+const PageTitle = styled.h1`
+  font-size: 1.75rem;
   color: var(--text-primary);
+  margin: 0;
   display: flex;
   align-items: center;
   
@@ -29,74 +33,23 @@ const RelatoriosTitulo = styled.h1`
   }
 `;
 
-const RelatoriosAcoes = styled.div`
-  display: flex;
-  gap: 0.5rem;
-  
-  @media (max-width: 576px) {
-    width: 100%;
-    justify-content: flex-end;
-  }
-`;
-
-const FiltroRelatorio = styled.div`
+const RelatorioContainer = styled.div`
   background-color: var(--surface);
   border-radius: 0.5rem;
   padding: 1.5rem;
-  margin-bottom: 1.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  margin-bottom: 2rem;
 `;
 
-const FiltroForm = styled.form`
-  display: flex;
-  gap: 1rem;
-  
-  @media (max-width: 768px) {
-    flex-direction: column;
-    gap: 0.75rem;
-  }
-`;
-
-const FiltroGrupo = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  flex: 1;
-`;
-
-const FiltroLabel = styled.label`
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: var(--text-secondary);
-`;
-
-const FiltroSelect = styled.select`
-  padding: 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: 0.375rem;
-  background-color: var(--surface);
-  font-size: 1rem;
-  color: var(--text-primary);
-  
-  &:focus {
-    outline: none;
-    border-color: var(--primary);
-  }
-`;
-
-const RelatorioCard = styled.div`
-  background-color: var(--surface);
-  border-radius: 0.5rem;
-  padding: 1.5rem;
-  margin-bottom: 1.5rem;
-`;
-
-const RelatorioTitulo = styled.h2`
+const SectionTitle = styled.h2`
   font-size: 1.25rem;
-  margin-bottom: 1.5rem;
   color: var(--text-primary);
+  margin: 0 0 1.5rem 0;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
 `;
 
-const EstatsticasGrid = styled.div`
+const ResumoGrid = styled.div`
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 1.5rem;
@@ -107,239 +60,282 @@ const EstatsticasGrid = styled.div`
   }
 `;
 
-const EstatsticaItem = styled.div`
-  background-color: var(--background);
-  border-radius: 0.375rem;
+const ResumoCard = styled.div`
   padding: 1.5rem;
-  text-align: center;
-`;
-
-const EstatsticaValor = styled.div<{ color?: string }>`
-  font-size: 2rem;
-  font-weight: bold;
-  color: ${props => props.color || 'var(--primary)'};
-  margin-bottom: 0.5rem;
-`;
-
-const EstatsticaLabel = styled.div`
-  color: var(--text-secondary);
-  font-size: 0.875rem;
-`;
-
-const CategoriaTable = styled.table`
-  width: 100%;
-  border-collapse: collapse;
-`;
-
-const CategoriaTableHead = styled.thead`
-  th {
-    text-align: left;
-    padding: 0.75rem;
-    border-bottom: 1px solid var(--border);
+  border-radius: 0.375rem;
+  background-color: var(--background);
+  
+  h3 {
+    font-size: 1rem;
     color: var(--text-secondary);
+    margin: 0 0 0.75rem 0;
     font-weight: 500;
-    font-size: 0.875rem;
   }
 `;
 
-const CategoriaTableBody = styled.tbody`
-  td {
-    padding: 0.75rem;
-    border-bottom: 1px solid var(--border);
+const ValorGrande = styled.div<{ color?: string }>`
+  font-size: 1.75rem;
+  font-weight: 600;
+  color: ${props => props.color || 'var(--primary)'};
+`;
+
+const CategoriaGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.5rem;
+  
+  @media (max-width: 768px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const BarraCategorias = styled.div`
+  margin-top: 0.5rem;
+`;
+
+const BarraCategoria = styled.div`
+  margin-bottom: 1rem;
+  
+  .info {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 0.25rem;
+  }
+  
+  .nome {
+    font-weight: 500;
     color: var(--text-primary);
   }
   
-  tr:last-child td {
-    border-bottom: none;
+  .valor {
+    color: var(--text-secondary);
+  }
+  
+  .barra-container {
+    height: 0.5rem;
+    background-color: var(--border);
+    border-radius: 0.25rem;
+    overflow: hidden;
+  }
+  
+  .barra {
+    height: 100%;
+    border-radius: 0.25rem;
   }
 `;
 
-const CategoriaValor = styled.td`
-  text-align: right;
-  font-weight: 500;
+const FiltroRelatorio = styled.div`
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  
+  @media (max-width: 576px) {
+    flex-direction: column;
+  }
+  
+  select {
+    padding: 0.5rem;
+    border-radius: 0.375rem;
+    border: 1px solid var(--border);
+    background-color: var(--surface);
+    min-width: 120px;
+  }
 `;
 
-const meses = [
-  { value: 1, label: 'Janeiro' },
-  { value: 2, label: 'Fevereiro' },
-  { value: 3, label: 'Março' },
-  { value: 4, label: 'Abril' },
-  { value: 5, label: 'Maio' },
-  { value: 6, label: 'Junho' },
-  { value: 7, label: 'Julho' },
-  { value: 8, label: 'Agosto' },
-  { value: 9, label: 'Setembro' },
-  { value: 10, label: 'Outubro' },
-  { value: 11, label: 'Novembro' },
-  { value: 12, label: 'Dezembro' },
-];
-
 export default function Relatorios() {
-  const { gerarRelatorio, exportarParaExcel, exportarParaPDF } = useFinancas();
-  const anoAtual = new Date().getFullYear();
-  const anos = [anoAtual - 2, anoAtual - 1, anoAtual, anoAtual + 1];
-  const mesAtual = new Date().getMonth() + 1;
+  const { contas, relatorio, filtro, setFiltro } = useFinancas();
+  const [mesSelecionado, setMesSelecionado] = useState<number>(
+    filtro.mes || new Date().getMonth() + 1
+  );
+  const [anoSelecionado, setAnoSelecionado] = useState<number>(
+    filtro.ano || new Date().getFullYear()
+  );
   
-  const [filtro, setFiltro] = useState({
-    mes: mesAtual,
-    ano: anoAtual,
-  });
+  // Obter anos disponíveis com base nas contas
+  const anosDisponiveis = React.useMemo(() => {
+    const anos = new Set<number>();
+    contas.forEach(conta => {
+      const data = new Date(conta.dataVencimento);
+      anos.add(data.getFullYear());
+    });
+    return Array.from(anos).sort((a, b) => b - a); // Ordenar decrescente
+  }, [contas]);
   
-  const [relatorio, setRelatorio] = useState(() => gerarRelatorio(filtro.mes, filtro.ano));
+  // Obter meses disponíveis
+  const mesesDisponiveis = [
+    { valor: 1, nome: 'Janeiro' },
+    { valor: 2, nome: 'Fevereiro' },
+    { valor: 3, nome: 'Março' },
+    { valor: 4, nome: 'Abril' },
+    { valor: 5, nome: 'Maio' },
+    { valor: 6, nome: 'Junho' },
+    { valor: 7, nome: 'Julho' },
+    { valor: 8, nome: 'Agosto' },
+    { valor: 9, nome: 'Setembro' },
+    { valor: 10, nome: 'Outubro' },
+    { valor: 11, nome: 'Novembro' },
+    { valor: 12, nome: 'Dezembro' }
+  ];
   
-  useEffect(() => {
-    setRelatorio(gerarRelatorio(filtro.mes, filtro.ano));
-  }, [filtro, gerarRelatorio]);
-  
-  const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const { name, value } = e.target;
-    setFiltro(prev => ({ ...prev, [name]: parseInt(value) }));
+  const handleMesChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const mes = parseInt(e.target.value);
+    setMesSelecionado(mes);
+    setFiltro(prev => ({ ...prev, mes }));
   };
   
-  const formatarValor = (valor: number) => {
+  const handleAnoChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const ano = parseInt(e.target.value);
+    setAnoSelecionado(ano);
+    setFiltro(prev => ({ ...prev, ano }));
+  };
+  
+  // Obter total geral
+  const totalGeral = relatorio.totalPago + relatorio.totalEmAberto + relatorio.totalVencido;
+  
+  // Calcular percentual por categoria
+  const categorias: { nome: string; valor: number; percentual: number; cor: string }[] = [
+    { 
+      nome: 'Fixas', 
+      valor: relatorio.contasPorCategoria.fixa,
+      percentual: totalGeral ? (relatorio.contasPorCategoria.fixa / totalGeral) * 100 : 0,
+      cor: 'var(--secondary)'
+    },
+    { 
+      nome: 'Variáveis', 
+      valor: relatorio.contasPorCategoria.variavel,
+      percentual: totalGeral ? (relatorio.contasPorCategoria.variavel / totalGeral) * 100 : 0,
+      cor: 'var(--primary)'
+    },
+    { 
+      nome: 'Cartão', 
+      valor: relatorio.contasPorCategoria.cartao,
+      percentual: totalGeral ? (relatorio.contasPorCategoria.cartao / totalGeral) * 100 : 0,
+      cor: 'var(--warning)'
+    },
+    { 
+      nome: 'Impostos', 
+      valor: relatorio.contasPorCategoria.imposto,
+      percentual: totalGeral ? (relatorio.contasPorCategoria.imposto / totalGeral) * 100 : 0,
+      cor: 'var(--error)'
+    },
+    { 
+      nome: 'Outros', 
+      valor: relatorio.contasPorCategoria.outro,
+      percentual: totalGeral ? (relatorio.contasPorCategoria.outro / totalGeral) * 100 : 0,
+      cor: '#9333EA'
+    }
+  ].sort((a, b) => b.valor - a.valor);
+  
+  // Formatar moeda
+  const formatarMoeda = (valor: number) => {
     return new Intl.NumberFormat('pt-BR', { 
       style: 'currency', 
       currency: 'BRL' 
     }).format(valor);
   };
   
-  const categoriaFormatada = (categoria: string) => {
-    switch(categoria) {
-      case 'fixa':
-        return 'Despesa Fixa';
-      case 'variavel':
-        return 'Despesa Variável';
-      case 'cartao':
-        return 'Cartão de Crédito';
-      case 'imposto':
-        return 'Imposto';
-      default:
-        return 'Outro';
-    }
-  };
-  
   return (
     <div>
-      <RelatoriosHeader>
-        <RelatoriosTitulo>
+      <PageHeader>
+        <PageTitle>
           <FiBarChart2 size={24} />
-          Relatórios
-        </RelatoriosTitulo>
-        
-        <RelatoriosAcoes>
-          <button 
-            className="btn btn-outline"
-            onClick={exportarParaExcel}
-            title="Exportar para Excel"
-          >
-            <FiDownload size={18} style={{ marginRight: '0.5rem' }} />
-            Excel
-          </button>
-          
-          <button 
-            className="btn btn-outline"
-            onClick={exportarParaPDF}
-            title="Exportar para PDF"
-          >
-            <FiPrinter size={18} style={{ marginRight: '0.5rem' }} />
-            PDF
-          </button>
-        </RelatoriosAcoes>
-      </RelatoriosHeader>
+          Relatório Financeiro
+        </PageTitle>
+        <ExportacaoButtons />
+      </PageHeader>
       
       <FiltroRelatorio>
-        <FiltroForm>
-          <FiltroGrupo>
-            <FiltroLabel htmlFor="mes">Mês</FiltroLabel>
-            <FiltroSelect 
-              id="mes"
-              name="mes"
-              value={filtro.mes}
-              onChange={handleChange}
-            >
-              {meses.map(mes => (
-                <option key={mes.value} value={mes.value}>
-                  {mes.label}
-                </option>
-              ))}
-            </FiltroSelect>
-          </FiltroGrupo>
-          
-          <FiltroGrupo>
-            <FiltroLabel htmlFor="ano">Ano</FiltroLabel>
-            <FiltroSelect 
-              id="ano"
-              name="ano"
-              value={filtro.ano}
-              onChange={handleChange}
-            >
-              {anos.map(ano => (
-                <option key={ano} value={ano}>
-                  {ano}
-                </option>
-              ))}
-            </FiltroSelect>
-          </FiltroGrupo>
-        </FiltroForm>
+        <select value={mesSelecionado} onChange={handleMesChange}>
+          {mesesDisponiveis.map(mes => (
+            <option key={mes.valor} value={mes.valor}>
+              {mes.nome}
+            </option>
+          ))}
+        </select>
+        
+        <select value={anoSelecionado} onChange={handleAnoChange}>
+          {anosDisponiveis.length > 0 ? (
+            anosDisponiveis.map(ano => (
+              <option key={ano} value={ano}>
+                {ano}
+              </option>
+            ))
+          ) : (
+            <option value={new Date().getFullYear()}>
+              {new Date().getFullYear()}
+            </option>
+          )}
+        </select>
       </FiltroRelatorio>
       
-      <RelatorioCard>
-        <RelatorioTitulo>
-          Resumo Financeiro - {meses.find(m => m.value === filtro.mes)?.label} / {filtro.ano}
-        </RelatorioTitulo>
+      <RelatorioContainer>
+        <SectionTitle>Resumo Financeiro</SectionTitle>
         
-        <EstatsticasGrid>
-          <EstatsticaItem>
-            <EstatsticaValor color="var(--secondary)">
-              {formatarValor(relatorio.totalPago)}
-            </EstatsticaValor>
-            <EstatsticaLabel>Total Pago</EstatsticaLabel>
-          </EstatsticaItem>
+        <ResumoGrid>
+          <ResumoCard>
+            <h3>Total Pago</h3>
+            <ValorGrande color="var(--secondary)">
+              {formatarMoeda(relatorio.totalPago)}
+            </ValorGrande>
+          </ResumoCard>
           
-          <EstatsticaItem>
-            <EstatsticaValor color="var(--warning)">
-              {formatarValor(relatorio.totalEmAberto)}
-            </EstatsticaValor>
-            <EstatsticaLabel>Em Aberto</EstatsticaLabel>
-          </EstatsticaItem>
+          <ResumoCard>
+            <h3>Em Aberto</h3>
+            <ValorGrande color="var(--warning)">
+              {formatarMoeda(relatorio.totalEmAberto)}
+            </ValorGrande>
+          </ResumoCard>
           
-          <EstatsticaItem>
-            <EstatsticaValor color="var(--error)">
-              {formatarValor(relatorio.totalVencido)}
-            </EstatsticaValor>
-            <EstatsticaLabel>Vencido</EstatsticaLabel>
-          </EstatsticaItem>
-        </EstatsticasGrid>
+          <ResumoCard>
+            <h3>Vencido</h3>
+            <ValorGrande color="var(--error)">
+              {formatarMoeda(relatorio.totalVencido)}
+            </ValorGrande>
+          </ResumoCard>
+        </ResumoGrid>
         
-        <RelatorioTitulo>Gastos por Categoria</RelatorioTitulo>
+        <SectionTitle>Despesas por Categoria</SectionTitle>
         
-        <CategoriaTable>
-          <CategoriaTableHead>
-            <tr>
-              <th>Categoria</th>
-              <th style={{ textAlign: 'right' }}>Valor</th>
-            </tr>
-          </CategoriaTableHead>
+        <CategoriaGrid>
+          <div>
+            <BarraCategorias>
+              {categorias.map(cat => (
+                <BarraCategoria key={cat.nome}>
+                  <div className="info">
+                    <span className="nome">{cat.nome}</span>
+                    <span className="valor">{formatarMoeda(cat.valor)}</span>
+                  </div>
+                  <div className="barra-container">
+                    <div 
+                      className="barra" 
+                      style={{ 
+                        width: `${cat.percentual}%`,
+                        backgroundColor: cat.cor
+                      }}
+                    />
+                  </div>
+                </BarraCategoria>
+              ))}
+            </BarraCategorias>
+          </div>
           
-          <CategoriaTableBody>
-            {Object.entries(relatorio.contasPorCategoria).map(([categoria, valor]) => (
-              <tr key={categoria}>
-                <td>{categoriaFormatada(categoria)}</td>
-                <CategoriaValor>{formatarValor(valor)}</CategoriaValor>
-              </tr>
-            ))}
+          <ResumoCard>
+            <h3>Total Geral</h3>
+            <ValorGrande color="var(--primary)">
+              {formatarMoeda(totalGeral)}
+            </ValorGrande>
             
-            <tr>
-              <td style={{ fontWeight: 'bold' }}>Total</td>
-              <CategoriaValor style={{ color: 'var(--primary)' }}>
-                {formatarValor(
-                  relatorio.totalPago + relatorio.totalEmAberto + relatorio.totalVencido
-                )}
-              </CategoriaValor>
-            </tr>
-          </CategoriaTableBody>
-        </CategoriaTable>
-      </RelatorioCard>
+            <div style={{ marginTop: '1.5rem' }}>
+              <p>
+                <strong>Mês:</strong> {mesesDisponiveis.find(m => m.valor === mesSelecionado)?.nome}
+              </p>
+              <p>
+                <strong>Ano:</strong> {anoSelecionado}
+              </p>
+            </div>
+          </ResumoCard>
+        </CategoriaGrid>
+      </RelatorioContainer>
     </div>
   );
 } 

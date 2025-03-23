@@ -1,15 +1,28 @@
 import React, { createContext, useState, useEffect, ReactNode } from 'react';
 import { toast } from 'react-toastify';
-import { AuthState, CredenciaisLogin, Usuario } from '../types';
-import { loginUsuario, logoutUsuario, registrarUsuario, verificarAutenticacao } from '../services/authService';
+import { CredenciaisLogin, Usuario } from '../types';
+import { 
+  loginUsuario, 
+  logoutUsuario, 
+  registrarUsuario,
+  verificarAutenticacao
+} from '../services/authService';
+
+// Interface para estado de autenticação
+interface AuthState {
+  token: string;
+  usuario: Usuario | null;
+  isAuthenticated: boolean;
+}
 
 interface AuthContextData {
-  isAuthenticated: boolean;
   usuario: Usuario | null;
+  token: string;
+  isAuthenticated: boolean;
   loading: boolean;
   login: (credenciais: CredenciaisLogin) => Promise<boolean>;
-  logout: () => void;
-  cadastrar: (nome: string, email: string, senha: string) => Promise<boolean>;
+  logout: () => Promise<void>;
+  cadastrar: (nome: string, email: string, senha: string, confirmacaoSenha: string) => Promise<boolean>;
 }
 
 interface AuthProviderProps {
@@ -19,119 +32,126 @@ interface AuthProviderProps {
 export const AuthContext = createContext({} as AuthContextData);
 
 export function AuthProvider({ children }: AuthProviderProps) {
-  const [data, setData] = useState<AuthState>({
+  const [authData, setAuthData] = useState<AuthState>({
     token: '',
-    usuario: {} as Usuario,
+    usuario: null,
     isAuthenticated: false
   });
-
   const [loading, setLoading] = useState(true);
 
-  // Verifica a autenticação ao iniciar
+  // Verifica autenticação ao iniciar
   useEffect(() => {
-    async function loadStorageData() {
+    async function verificarAuth() {
+      setLoading(true);
       try {
-        setLoading(true);
-        
         const { usuario, token } = await verificarAutenticacao();
-
+        
         if (token && usuario) {
-          setData({
+          setAuthData({
             token,
             usuario,
             isAuthenticated: true
           });
+        } else {
+          setAuthData({
+            token: '',
+            usuario: null,
+            isAuthenticated: false
+          });
         }
       } catch (error) {
-        console.error('Erro ao carregar dados de autenticação:', error);
+        console.error('Erro ao verificar autenticação:', error);
+        setAuthData({
+          token: '',
+          usuario: null,
+          isAuthenticated: false
+        });
       } finally {
         setLoading(false);
       }
     }
 
-    loadStorageData();
+    verificarAuth();
   }, []);
 
-  // Função para autenticar o usuário
   async function login(credenciais: CredenciaisLogin): Promise<boolean> {
-    try {
-      setLoading(true);
-      
-      const { usuario, token } = await loginUsuario(credenciais);
-
-      if (!usuario || !token) {
-        return false;
-      }
-
-      // Atualiza o estado
-      setData({
-        token,
-        usuario,
-        isAuthenticated: true
-      });
-
-      return true;
-    } catch (error) {
-      console.error('Erro ao fazer login:', error);
-      toast.error('Erro ao fazer login. Tente novamente.');
-      return false;
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // Função para cadastrar novo usuário
-  async function cadastrar(nome: string, email: string, senha: string): Promise<boolean> {
-    try {
-      setLoading(true);
-      
-      const { usuario, token } = await registrarUsuario(nome, email, senha);
-
-      if (!usuario || !token) {
-        return false;
-      }
-
-      // Atualiza o estado
-      setData({
-        token,
-        usuario,
-        isAuthenticated: true
-      });
-
-      return true;
-    } catch (error) {
-      console.error('Erro ao cadastrar:', error);
-      toast.error('Erro ao cadastrar. Tente novamente.');
-      return false;
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // Função para fazer logout
-  async function logout() {
     setLoading(true);
-    
+    try {
+      const { usuario, token } = await loginUsuario(credenciais);
+      
+      if (!usuario || !token) {
+        setLoading(false);
+        return false;
+      }
+
+      setAuthData({
+        token,
+        usuario,
+        isAuthenticated: true
+      });
+      
+      setLoading(false);
+      return true;
+    } catch (error) {
+      console.error('Erro durante login:', error);
+      setLoading(false);
+      return false;
+    }
+  }
+
+  async function logout(): Promise<void> {
+    setLoading(true);
     try {
       await logoutUsuario();
       
-      setData({
+      setAuthData({
         token: '',
-        usuario: {} as Usuario,
+        usuario: null,
         isAuthenticated: false
       });
     } catch (error) {
-      console.error('Erro ao fazer logout:', error);
+      console.error('Erro durante logout:', error);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function cadastrar(
+    nome: string, 
+    email: string, 
+    senha: string,
+    confirmacaoSenha: string
+  ): Promise<boolean> {
+    setLoading(true);
+    try {
+      const { usuario, token } = await registrarUsuario(nome, email, senha, confirmacaoSenha);
+      
+      if (!usuario || !token) {
+        setLoading(false);
+        return false;
+      }
+
+      setAuthData({
+        token,
+        usuario,
+        isAuthenticated: true
+      });
+      
+      setLoading(false);
+      return true;
+    } catch (error) {
+      console.error('Erro durante cadastro:', error);
+      setLoading(false);
+      return false;
     }
   }
 
   return (
     <AuthContext.Provider
       value={{
-        isAuthenticated: data.isAuthenticated,
-        usuario: data.isAuthenticated ? data.usuario : null,
+        usuario: authData.usuario,
+        token: authData.token,
+        isAuthenticated: authData.isAuthenticated,
         loading,
         login,
         logout,
