@@ -53,17 +53,17 @@ const EmptyState = styled.div`
 `;
 
 export default function ContasVencidas() {
-  const { contas, atualizarFiltro } = useFinancas();
+  const { contas, aplicarFiltro } = useFinancas();
   
   useEffect(() => {
     // Ao entrar na página, atualiza o filtro para mostrar apenas contas vencidas
-    atualizarFiltro({ status: 'vencida' });
+    aplicarFiltro({ status: 'vencida' });
     
     // Limpa o filtro ao sair da página
     return () => {
-      atualizarFiltro({ status: undefined });
+      aplicarFiltro({ status: undefined });
     };
-  }, [atualizarFiltro]);
+  }, [aplicarFiltro]);
   
   const contasVencidas = contas.filter(conta => conta.status === 'vencida');
   
