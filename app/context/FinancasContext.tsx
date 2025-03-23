@@ -1,10 +1,18 @@
 import React, { createContext, useState, useEffect, ReactNode, useRef, useCallback } from 'react';
-import { v4 as uuidv4 } from 'uuid';
 import { format, isAfter, parseISO, addDays, differenceInDays, startOfDay } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 import { toast } from 'react-toastify';
 import { Conta, Filtro, StatusConta, CategoriaConta, Relatorio } from '../types';
 import { jsPDF } from 'jspdf';
 import * as XLSX from 'xlsx';
+import { useAuth } from '../hooks/useAuth';
+import { 
+  buscarContas as buscarContasService,
+  adicionarConta as adicionarContaService,
+  atualizarConta as atualizarContaService,
+  removerConta as removerContaService,
+  marcarComoPaga as marcarComoPagaService
+} from '../services/contasService';
 
 interface FinancasContextData {
   contas: Conta[];
@@ -18,6 +26,7 @@ interface FinancasContextData {
   gerarRelatorio: (mes: number, ano: number) => Relatorio;
   exportarParaExcel: () => void;
   exportarParaPDF: () => void;
+  carregando: boolean;
 }
 
 interface FinancasProviderProps {
@@ -29,18 +38,10 @@ export const FinancasContext = createContext({} as FinancasContextData);
 export function FinancasProvider({ children }: FinancasProviderProps) {
   // Referência para o último dia em que as contas foram verificadas
   const ultimaVerificacaoRef = useRef(new Date());
+  const { usuario, isAuthenticated } = useAuth();
+  const [carregando, setCarregando] = useState(false);
   
-  const [contas, setContas] = useState<Conta[]>(() => {
-    try {
-      const storedContas = localStorage.getItem('@MFFinancas:contas');
-      if (storedContas) {
-        return JSON.parse(storedContas);
-      }
-    } catch (error) {
-      console.error('Erro ao carregar dados do localStorage:', error);
-    }
-    return [];
-  });
+  const [contas, setContas] = useState<Conta[]>([]);
 
   const [filtro, setFiltro] = useState<Filtro>(() => {
     try {
@@ -51,528 +52,495 @@ export function FinancasProvider({ children }: FinancasProviderProps) {
     } catch (error) {
       console.error('Erro ao carregar filtro do localStorage:', error);
     }
-    
-    // Filtro padrão (mês e ano atuais)
-    const hoje = new Date();
     return {
-      mes: hoje.getMonth() + 1,
-      ano: hoje.getFullYear(),
+      mes: new Date().getMonth() + 1,
+      ano: new Date().getFullYear()
     };
   });
 
-  // Função para verificar contas vencidas
+  // Carregar contas quando o usuário estiver autenticado
+  useEffect(() => {
+    async function carregarContas() {
+      if (isAuthenticated && usuario?.id) {
+        setCarregando(true);
+        try {
+          const contasCarregadas = await buscarContasService(usuario.id);
+          setContas(contasCarregadas);
+        } catch (error) {
+          console.error('Erro ao carregar contas:', error);
+          toast.error('Erro ao carregar contas. Tente novamente.');
+        } finally {
+          setCarregando(false);
+        }
+      }
+    }
+
+    carregarContas();
+  }, [isAuthenticated, usuario]);
+
+  // Salvar filtro no localStorage
+  useEffect(() => {
+    localStorage.setItem('@MFFinancas:filtro', JSON.stringify(filtro));
+  }, [filtro]);
+
+  // Verificar contas vencidas
   const verificarContasVencidas = useCallback(() => {
     const hoje = startOfDay(new Date());
-    const ultimaVerificacao = startOfDay(ultimaVerificacaoRef.current);
     
-    // Só atualiza se for um novo dia
-    if (hoje.getTime() !== ultimaVerificacao.getTime()) {
-      const contasAtualizadas = contas.map(conta => {
-        if (conta.status === 'aberta' && isAfter(hoje, parseISO(conta.dataVencimento))) {
-          return { ...conta, status: 'vencida' as StatusConta };
-        }
-        return conta;
-      });
-
-      if (JSON.stringify(contasAtualizadas) !== JSON.stringify(contas)) {
-        setContas(contasAtualizadas);
+    // Verifica se já verificou as contas hoje
+    if (differenceInDays(hoje, ultimaVerificacaoRef.current) === 0) {
+      return;
+    }
+    
+    // Atualiza a referência da última verificação
+    ultimaVerificacaoRef.current = hoje;
+    
+    const contasAtualizadas = contas.map(conta => {
+      if (conta.status === 'aberta' && isAfter(hoje, parseISO(conta.dataVencimento))) {
+        return { ...conta, status: 'vencida' as StatusConta };
       }
-      
-      ultimaVerificacaoRef.current = hoje;
-    }
-  }, [contas]);
-
-  // Efeito para salvar dados no localStorage quando o estado de contas mudar
-  useEffect(() => {
-    try {
-      localStorage.setItem('@MFFinancas:contas', JSON.stringify(contas));
-    } catch (error) {
-      console.error('Erro ao salvar dados no localStorage:', error);
-    }
-  }, [contas]);
-
-  // Efeito para verificar contas vencidas na inicialização e quando o componente é montado
-  useEffect(() => {
-    verificarContasVencidas();
+      return conta;
+    });
     
-    // Executa a verificação a cada vez que o aplicativo é aberto/fechado
-    window.addEventListener('focus', verificarContasVencidas);
+    // Se houver alterações, atualiza o estado
+    if (JSON.stringify(contasAtualizadas) !== JSON.stringify(contas)) {
+      setContas(contasAtualizadas);
+      
+      // Atualizar no servidor as contas que foram alteradas
+      contasAtualizadas.forEach(async (conta) => {
+        const contaOriginal = contas.find(c => c.id === conta.id);
+        
+        if (contaOriginal && contaOriginal.status !== conta.status && usuario?.id) {
+          await atualizarContaService(conta.id, { status: conta.status }, usuario.id);
+        }
+      });
+    }
+  }, [contas, usuario]);
+
+  // Verificar contas vencidas ao iniciar e ao focar na janela
+  useEffect(() => {
+    if (contas.length > 0) {
+      verificarContasVencidas();
+    }
+    
+    const onFocus = () => {
+      if (contas.length > 0) {
+        verificarContasVencidas();
+      }
+    };
+    
+    window.addEventListener('focus', onFocus);
     
     return () => {
-      window.removeEventListener('focus', verificarContasVencidas);
+      window.removeEventListener('focus', onFocus);
     };
-  }, [verificarContasVencidas]);
+  }, [contas, verificarContasVencidas]);
 
-  // Filtrar contas com base no filtro atual
-  const contasFiltradas = React.useMemo(() => {
-    return contas.filter(conta => {
-      const dataVencimento = parseISO(conta.dataVencimento);
-      const mesVencimento = dataVencimento.getMonth() + 1;
-      const anoVencimento = dataVencimento.getFullYear();
-      
-      const filtroMes = filtro.mes ? mesVencimento === filtro.mes : true;
-      const filtroAno = filtro.ano ? anoVencimento === filtro.ano : true;
-      const filtroCategoria = filtro.categoria ? conta.categoria === filtro.categoria : true;
-      const filtroStatus = filtro.status ? conta.status === filtro.status : true;
-      
-      return filtroMes && filtroAno && filtroCategoria && filtroStatus;
-    });
-  }, [contas, filtro]);
+  // Filtra as contas de acordo com o filtro
+  const contasFiltradas = contas.filter(conta => {
+    const dataVencimento = parseISO(conta.dataVencimento);
+    const mesVencimento = dataVencimento.getMonth() + 1;
+    const anoVencimento = dataVencimento.getFullYear();
+    
+    const filtroMes = filtro.mes === undefined || filtro.mes === mesVencimento;
+    const filtroAno = filtro.ano === undefined || filtro.ano === anoVencimento;
+    const filtroCategoria = filtro.categoria === undefined || filtro.categoria === conta.categoria;
+    const filtroStatus = filtro.status === undefined || filtro.status === conta.status;
+    
+    return filtroMes && filtroAno && filtroCategoria && filtroStatus;
+  });
 
-  function adicionarConta(novaConta: Omit<Conta, 'id' | 'status'>) {
-    const contaCompleta: Conta = {
-      ...novaConta,
-      id: uuidv4(),
-      status: 'aberta',
-    };
-
-    // Verifica se a conta já está vencida na criação
-    const hoje = new Date();
-    if (isAfter(hoje, parseISO(contaCompleta.dataVencimento))) {
-      contaCompleta.status = 'vencida';
-    }
-
-    setContas(estadoAnterior => [...estadoAnterior, contaCompleta]);
-    toast.success('Conta cadastrada com sucesso!');
-  }
-
-  function atualizarConta(id: string, dadosAtualizados: Partial<Conta>) {
-    setContas(estadoAnterior => 
-      estadoAnterior.map(conta => 
-        conta.id === id ? { ...conta, ...dadosAtualizados } : conta
-      )
-    );
-    toast.success('Conta atualizada com sucesso!');
-  }
-
-  function removerConta(id: string) {
-    setContas(estadoAnterior => estadoAnterior.filter(conta => conta.id !== id));
-    toast.success('Conta removida com sucesso!');
-  }
-
-  function marcarComoPaga(id: string) {
-    const hoje = new Date();
-    setContas(estadoAnterior => 
-      estadoAnterior.map(conta => 
-        conta.id === id 
-          ? { 
-              ...conta, 
-              status: 'paga', 
-              dataPagamento: hoje.toISOString() 
-            } 
-          : conta
-      )
-    );
-    toast.success('Conta marcada como paga!');
-  }
-
+  // Função para atualizar o filtro
   function atualizarFiltro(novoFiltro: Partial<Filtro>) {
-    setFiltro(filtroAnterior => ({ ...filtroAnterior, ...novoFiltro }));
+    setFiltro(prevFiltro => ({ ...prevFiltro, ...novoFiltro }));
   }
 
+  // Função para adicionar uma nova conta
+  async function adicionarConta(conta: Omit<Conta, 'id' | 'status'>) {
+    if (!usuario?.id) {
+      toast.error('Você precisa estar autenticado para adicionar uma conta.');
+      return;
+    }
+    
+    setCarregando(true);
+    
+    try {
+      const novaConta = await adicionarContaService(conta, usuario.id);
+      
+      if (novaConta) {
+        setContas(prevContas => [...prevContas, novaConta]);
+      }
+    } catch (error) {
+      console.error('Erro ao adicionar conta:', error);
+      toast.error('Erro ao adicionar conta. Tente novamente.');
+    } finally {
+      setCarregando(false);
+    }
+  }
+
+  // Função para atualizar uma conta existente
+  async function atualizarConta(id: string, conta: Partial<Conta>) {
+    if (!usuario?.id) {
+      toast.error('Você precisa estar autenticado para atualizar uma conta.');
+      return;
+    }
+    
+    setCarregando(true);
+    
+    try {
+      const sucesso = await atualizarContaService(id, conta, usuario.id);
+      
+      if (sucesso) {
+        setContas(prevContas => 
+          prevContas.map(c => c.id === id ? { ...c, ...conta } : c)
+        );
+      }
+    } catch (error) {
+      console.error('Erro ao atualizar conta:', error);
+      toast.error('Erro ao atualizar conta. Tente novamente.');
+    } finally {
+      setCarregando(false);
+    }
+  }
+
+  // Função para remover uma conta
+  async function removerConta(id: string) {
+    if (!usuario?.id) {
+      toast.error('Você precisa estar autenticado para remover uma conta.');
+      return;
+    }
+    
+    setCarregando(true);
+    
+    try {
+      const sucesso = await removerContaService(id, usuario.id);
+      
+      if (sucesso) {
+        setContas(prevContas => prevContas.filter(c => c.id !== id));
+      }
+    } catch (error) {
+      console.error('Erro ao remover conta:', error);
+      toast.error('Erro ao remover conta. Tente novamente.');
+    } finally {
+      setCarregando(false);
+    }
+  }
+
+  // Função para marcar uma conta como paga
+  async function marcarComoPaga(id: string) {
+    if (!usuario?.id) {
+      toast.error('Você precisa estar autenticado para marcar uma conta como paga.');
+      return;
+    }
+    
+    setCarregando(true);
+    
+    try {
+      const sucesso = await marcarComoPagaService(id, usuario.id);
+      
+      if (sucesso) {
+        const dataPagamento = new Date().toISOString();
+        
+        setContas(prevContas => 
+          prevContas.map(c => c.id === id 
+            ? { ...c, status: 'paga', dataPagamento } 
+            : c
+          )
+        );
+      }
+    } catch (error) {
+      console.error('Erro ao marcar conta como paga:', error);
+      toast.error('Erro ao marcar conta como paga. Tente novamente.');
+    } finally {
+      setCarregando(false);
+    }
+  }
+
+  // Função para gerar um relatório de contas
   function gerarRelatorio(mes: number, ano: number): Relatorio {
-    // Filtra contas do período
-    const contasDoPeriodo = contas.filter(conta => {
+    const contasDoMes = contas.filter(conta => {
       const dataVencimento = parseISO(conta.dataVencimento);
       const mesVencimento = dataVencimento.getMonth() + 1;
       const anoVencimento = dataVencimento.getFullYear();
       
       return mesVencimento === mes && anoVencimento === ano;
     });
-
-    // Calcula totais
-    const totalPago = contasDoPeriodo
+    
+    const totalPago = contasDoMes
       .filter(conta => conta.status === 'paga')
-      .reduce((acc, conta) => acc + conta.valor, 0);
-    
-    const totalEmAberto = contasDoPeriodo
+      .reduce((total, conta) => total + conta.valor, 0);
+      
+    const totalEmAberto = contasDoMes
       .filter(conta => conta.status === 'aberta')
-      .reduce((acc, conta) => acc + conta.valor, 0);
-    
-    const totalVencido = contasDoPeriodo
+      .reduce((total, conta) => total + conta.valor, 0);
+      
+    const totalVencido = contasDoMes
       .filter(conta => conta.status === 'vencida')
-      .reduce((acc, conta) => acc + conta.valor, 0);
-
-    // Calcula totais por categoria
-    const contasPorCategoria = contasDoPeriodo.reduce((acc, conta) => {
-      acc[conta.categoria] = (acc[conta.categoria] || 0) + conta.valor;
-      return acc;
-    }, {} as Record<CategoriaConta, number>);
-
+      .reduce((total, conta) => total + conta.valor, 0);
+    
+    // Agrupa as contas por categoria
+    const contasPorCategoria: Record<CategoriaConta, number> = {
+      fixa: 0,
+      variavel: 0,
+      cartao: 0,
+      imposto: 0,
+      outro: 0
+    };
+    
+    contasDoMes.forEach(conta => {
+      contasPorCategoria[conta.categoria] += conta.valor;
+    });
+    
     return {
       totalPago,
       totalEmAberto,
       totalVencido,
       contasPorCategoria,
-      periodo: { mes, ano }
+      periodo: {
+        mes,
+        ano
+      }
     };
   }
 
+  // Função para exportar os dados para Excel
   function exportarParaExcel() {
     try {
-      // Gera o relatório para o período atual
-      const relatorio = gerarRelatorio(filtro.mes || new Date().getMonth() + 1, filtro.ano || new Date().getFullYear());
+      // Se houver um filtro aplicado, usa as contas filtradas
+      // Caso contrário, usa todas as contas
+      const dados = contasFiltradas.length > 0 ? contasFiltradas : contas;
       
-      // Obtém o nome do mês para o título
-      const mesesNomes = [
-        'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-        'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
-      ];
-      const nomeMes = mesesNomes[relatorio.periodo.mes - 1];
-      
-      // Helper para converter o nome da categoria
-      const categoriaFormatada = (categoria: string) => {
-        switch(categoria) {
-          case 'fixa':
-            return 'Despesa Fixa';
-          case 'variavel':
-            return 'Despesa Variável';
-          case 'cartao':
-            return 'Cartão de Crédito';
-          case 'imposto':
-            return 'Imposto';
-          default:
-            return 'Outro';
-        }
-      };
-      
-      // Helper para formatar o status
-      const statusFormatado = (status: string) => {
-        switch(status) {
-          case 'paga':
-            return 'Paga';
-          case 'aberta':
-            return 'Em aberto';
-          case 'vencida':
-            return 'Vencida';
-          default:
-            return status;
-        }
-      };
-      
-      // Filtra contas do período
-      const contasDoPeriodo = contas.filter(conta => {
-        const dataVencimento = parseISO(conta.dataVencimento);
-        const mesVencimento = dataVencimento.getMonth() + 1;
-        const anoVencimento = dataVencimento.getFullYear();
-        
-        return mesVencimento === relatorio.periodo.mes && anoVencimento === relatorio.periodo.ano;
-      });
-      
-      // Cria uma nova planilha
-      const workbook = XLSX.utils.book_new();
-      
-      // ---- Planilha 1: Resumo ----
-      const resumoData = [
-        ['Relatório Financeiro', `${nomeMes}/${relatorio.periodo.ano}`],
-        ['Gerado em:', format(new Date(), 'dd/MM/yyyy HH:mm')],
-        [''],
-        ['Resumo Financeiro'],
-        ['Total Pago:', relatorio.totalPago],
-        ['Em Aberto:', relatorio.totalEmAberto],
-        ['Vencido:', relatorio.totalVencido],
-        ['Total Geral:', relatorio.totalPago + relatorio.totalEmAberto + relatorio.totalVencido],
-        [''],
-        ['Gastos por Categoria'],
-      ];
-      
-      // Adiciona os gastos por categoria
-      Object.entries(relatorio.contasPorCategoria).forEach(([categoria, valor]) => {
-        resumoData.push([categoriaFormatada(categoria), valor]);
-      });
-      
-      // Adiciona o total de gastos
-      resumoData.push(['Total', relatorio.totalPago + relatorio.totalEmAberto + relatorio.totalVencido]);
-      
-      // Cria a planilha de resumo
-      const resumoWorksheet = XLSX.utils.aoa_to_sheet(resumoData);
-      XLSX.utils.book_append_sheet(workbook, resumoWorksheet, 'Resumo');
-      
-      // ---- Planilha 2: Detalhes das Contas ----
-      // Cabeçalho
-      const contasHeaders = ['Nome', 'Valor', 'Data de Vencimento', 'Status', 'Categoria', 'Observações'];
-      
-      // Converte as contas para linhas
-      const contasData = contasDoPeriodo.map(conta => [
-        conta.nome,
-        conta.valor,
-        format(parseISO(conta.dataVencimento), 'dd/MM/yyyy'),
-        statusFormatado(conta.status),
-        categoriaFormatada(conta.categoria),
-        conta.observacoes || ''
-      ]);
-      
-      // Adiciona cabeçalho às linhas
-      contasData.unshift(contasHeaders);
-      
-      // Cria a planilha de contas
-      const contasWorksheet = XLSX.utils.aoa_to_sheet(contasData);
-      XLSX.utils.book_append_sheet(workbook, contasWorksheet, 'Contas');
-      
-      // Salva o arquivo Excel
-      const nomeArquivo = `relatorio-financeiro-${relatorio.periodo.mes}-${relatorio.periodo.ano}.xlsx`;
-      XLSX.writeFile(workbook, nomeArquivo);
-      
-      toast.success('Relatório Excel gerado com sucesso!');
-    } catch (error) {
-      console.error('Erro ao gerar Excel:', error);
-      toast.error('Erro ao gerar o relatório Excel. Tente novamente.');
-    }
-  }
-
-  function exportarParaPDF() {
-    try {
-      // Gera o relatório para o período atual
-      const relatorio = gerarRelatorio(filtro.mes || new Date().getMonth() + 1, filtro.ano || new Date().getFullYear());
-      
-      // Obtém o nome do mês para o título
-      const mesesNomes = [
-        'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
-        'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
-      ];
-      const nomeMes = mesesNomes[relatorio.periodo.mes - 1];
-      
-      // Cria um novo documento PDF
-      const doc = new jsPDF();
-      
-      // Adiciona cores para status
-      const cores = {
-        paga: [39, 174, 96] as [number, number, number],    // Verde
-        aberta: [243, 156, 18] as [number, number, number], // Amarelo
-        vencida: [231, 76, 60] as [number, number, number]  // Vermelho
-      };
-      
-      // Adiciona o título do relatório
-      doc.setFontSize(18);
-      doc.setTextColor(33, 37, 41);
-      doc.text(`Relatório Financeiro - ${nomeMes}/${relatorio.periodo.ano}`, 105, 20, { align: 'center' });
-      
-      // Adiciona a data de geração
-      doc.setFontSize(10);
-      doc.setTextColor(108, 117, 125);
-      doc.text(`Gerado em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, 105, 28, { align: 'center' });
-      
-      // Função para formatar valores monetários
-      const formatarValor = (valor: number) => {
-        return new Intl.NumberFormat('pt-BR', { 
-          style: 'currency', 
-          currency: 'BRL' 
-        }).format(valor);
-      };
-      
-      // Função para formatar datas
-      const formatarData = (dataISO: string) => {
-        return format(parseISO(dataISO), 'dd/MM/yyyy');
-      };
-      
-      // Helper para converter o nome da categoria
-      const categoriaFormatada = (categoria: string) => {
-        switch(categoria) {
-          case 'fixa':
-            return 'Despesa Fixa';
-          case 'variavel':
-            return 'Despesa Variável';
-          case 'cartao':
-            return 'Cartão de Crédito';
-          case 'imposto':
-            return 'Imposto';
-          default:
-            return 'Outro';
-        }
-      };
-      
-      // Helper para formatar o status
-      const statusFormatado = (status: string) => {
-        switch(status) {
-          case 'paga':
-            return 'Paga';
-          case 'aberta':
-            return 'Em aberto';
-          case 'vencida':
-            return 'Vencida';
-          default:
-            return status;
-        }
-      };
-      
-      // ---- Seção 1: Resumo Financeiro ----
-      doc.setFontSize(14);
-      doc.setTextColor(33, 37, 41);
-      doc.text('Resumo Financeiro', 20, 40);
-      
-      // Linha horizontal
-      doc.setDrawColor(230, 230, 230);
-      doc.line(20, 42, 190, 42);
-      
-      // Dados do resumo financeiro
-      doc.setFontSize(12);
-      doc.setTextColor(33, 37, 41);
-      doc.text('Total Pago:', 20, 52);
-      doc.setTextColor(cores.paga[0], cores.paga[1], cores.paga[2]);
-      doc.text(formatarValor(relatorio.totalPago), 70, 52);
-      
-      doc.setTextColor(33, 37, 41);
-      doc.text('Em Aberto:', 20, 60);
-      doc.setTextColor(cores.aberta[0], cores.aberta[1], cores.aberta[2]);
-      doc.text(formatarValor(relatorio.totalEmAberto), 70, 60);
-      
-      doc.setTextColor(33, 37, 41);
-      doc.text('Vencido:', 20, 68);
-      doc.setTextColor(cores.vencida[0], cores.vencida[1], cores.vencida[2]);
-      doc.text(formatarValor(relatorio.totalVencido), 70, 68);
-      
-      doc.setTextColor(33, 37, 41);
-      doc.text('Total Geral:', 20, 76);
-      doc.setFont('Helvetica', 'bold');
-      doc.text(formatarValor(relatorio.totalPago + relatorio.totalEmAberto + relatorio.totalVencido), 70, 76);
-      doc.setFont('Helvetica', 'normal');
-      
-      // ---- Seção 2: Gastos por Categoria ----
-      doc.setFontSize(14);
-      doc.setTextColor(33, 37, 41);
-      doc.text('Gastos por Categoria', 20, 90);
-      
-      // Linha horizontal
-      doc.line(20, 92, 190, 92);
-      
-      // Cabeçalho da tabela
-      doc.setFontSize(11);
-      doc.setTextColor(108, 117, 125);
-      doc.text('Categoria', 20, 100);
-      doc.text('Valor', 150, 100);
-      
-      // Dados da tabela
-      let y = 108;
-      doc.setFontSize(11);
-      doc.setTextColor(33, 37, 41);
-      
-      Object.entries(relatorio.contasPorCategoria).forEach(([categoria, valor]) => {
-        doc.text(categoriaFormatada(categoria), 20, y);
-        doc.text(formatarValor(valor), 150, y, { align: 'left' });
-        y += 8;
-      });
-      
-      // Total da tabela
-      y += 4;
-      doc.setFont('Helvetica', 'bold');
-      doc.text('Total', 20, y);
-      doc.text(
-        formatarValor(relatorio.totalPago + relatorio.totalEmAberto + relatorio.totalVencido),
-        150, y, { align: 'left' }
-      );
-      doc.setFont('Helvetica', 'normal');
-      
-      // ---- Seção 3: Lista de Contas do Período ----
-      y += 16;
-      doc.setFontSize(14);
-      doc.setTextColor(33, 37, 41);
-      doc.text('Contas do Período', 20, y);
-      
-      // Linha horizontal
-      y += 2;
-      doc.line(20, y, 190, y);
-      y += 8;
-      
-      // Filtra contas do período
-      const contasDoPeriodo = contas.filter(conta => {
-        const dataVencimento = parseISO(conta.dataVencimento);
-        const mesVencimento = dataVencimento.getMonth() + 1;
-        const anoVencimento = dataVencimento.getFullYear();
-        
-        return mesVencimento === relatorio.periodo.mes && anoVencimento === relatorio.periodo.ano;
-      });
-      
-      // Se não tiver contas no período, mostra uma mensagem
-      if (contasDoPeriodo.length === 0) {
-        doc.setFontSize(11);
-        doc.setTextColor(108, 117, 125);
-        doc.text('Nenhuma conta registrada para este período.', 20, y);
-      } else {
-        // Cabeçalho da tabela de contas
-        doc.setFontSize(10);
-        doc.setTextColor(108, 117, 125);
-        doc.text('Nome', 20, y);
-        doc.text('Vencimento', 90, y);
-        doc.text('Valor', 125, y);
-        doc.text('Status', 160, y);
-        y += 6;
-        
-        // Dados da tabela
-        doc.setFontSize(10);
-        doc.setTextColor(33, 37, 41);
-        
-        // Limita o número de contas a serem exibidas para evitar quebra de página
-        const contasExibidas = contasDoPeriodo.slice(0, 15);
-        
-        contasExibidas.forEach(conta => {
-          // Se estiver perto do fim da página, adiciona uma nova página
-          if (y > 270) {
-            doc.addPage();
-            y = 20;
-            
-            // Adiciona cabeçalho na nova página
-            doc.setFontSize(10);
-            doc.setTextColor(108, 117, 125);
-            doc.text('Nome', 20, y);
-            doc.text('Vencimento', 90, y);
-            doc.text('Valor', 125, y);
-            doc.text('Status', 160, y);
-            y += 6;
-            
-            doc.setFontSize(10);
-            doc.setTextColor(33, 37, 41);
-          }
-          
-          // Nome da conta (truncado se for muito longo)
-          const nomeExibido = conta.nome.length > 30 ? conta.nome.substring(0, 27) + '...' : conta.nome;
-          doc.text(nomeExibido, 20, y);
-          
-          // Data de vencimento
-          doc.text(formatarData(conta.dataVencimento), 90, y);
-          
-          // Valor
-          doc.text(formatarValor(conta.valor), 125, y);
-          
-          // Status com cor correspondente
-          const statusConta = conta.status as keyof typeof cores;
-          doc.setTextColor(cores[statusConta][0], cores[statusConta][1], cores[statusConta][2]);
-          doc.text(statusFormatado(conta.status), 160, y);
-          doc.setTextColor(33, 37, 41);
-          
-          y += 6;
-        });
-        
-        // Se tiver muitas contas, mostrar indicação de que há mais
-        if (contasDoPeriodo.length > contasExibidas.length) {
-          doc.setFontSize(9);
-          doc.setTextColor(108, 117, 125);
-          doc.text(`... e mais ${contasDoPeriodo.length - contasExibidas.length} conta(s) não exibida(s) no relatório.`, 20, y);
-        }
+      if (dados.length === 0) {
+        toast.info('Não há dados para exportar.');
+        return;
       }
       
-      // Adiciona um rodapé
-      doc.setFontSize(9);
-      doc.setTextColor(108, 117, 125);
-      doc.text('MF - Finanças - Gerenciador de Contas a Pagar', 105, 285, { align: 'center' });
+      // Cria o relatório
+      const relatorio = gerarRelatorio(
+        filtro.mes || new Date().getMonth() + 1, 
+        filtro.ano || new Date().getFullYear()
+      );
       
-      // Salva o PDF
-      doc.save(`relatorio-financeiro-${relatorio.periodo.mes}-${relatorio.periodo.ano}.pdf`);
+      // Prepara os dados para o Excel
+      const dadosContas = dados.map(conta => ({
+        'Nome': conta.nome,
+        'Valor': conta.valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+        'Data de Vencimento': format(parseISO(conta.dataVencimento), 'dd/MM/yyyy'),
+        'Status': conta.status === 'paga' 
+          ? 'Paga' 
+          : conta.status === 'vencida' 
+            ? 'Vencida' 
+            : 'Em aberto',
+        'Categoria': 
+          conta.categoria === 'fixa' ? 'Fixa' :
+          conta.categoria === 'variavel' ? 'Variável' :
+          conta.categoria === 'cartao' ? 'Cartão de Crédito' :
+          conta.categoria === 'imposto' ? 'Imposto' : 'Outro',
+        'Data de Pagamento': conta.dataPagamento 
+          ? format(parseISO(conta.dataPagamento), 'dd/MM/yyyy') 
+          : '-',
+        'Observações': conta.observacoes || '-'
+      }));
       
-      toast.success('Relatório PDF gerado com sucesso!');
+      // Prepara os dados do resumo
+      const dadosResumo = [
+        { 'Resumo': 'Total Pago', 'Valor': relatorio.totalPago.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) },
+        { 'Resumo': 'Total em Aberto', 'Valor': relatorio.totalEmAberto.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) },
+        { 'Resumo': 'Total Vencido', 'Valor': relatorio.totalVencido.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) },
+        { 'Resumo': 'Total Geral', 'Valor': (relatorio.totalPago + relatorio.totalEmAberto + relatorio.totalVencido).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) },
+        { 'Resumo': '', 'Valor': '' },
+        { 'Resumo': 'Gastos por Categoria', 'Valor': '' },
+        { 'Resumo': 'Fixa', 'Valor': relatorio.contasPorCategoria.fixa.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) },
+        { 'Resumo': 'Variável', 'Valor': relatorio.contasPorCategoria.variavel.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) },
+        { 'Resumo': 'Cartão de Crédito', 'Valor': relatorio.contasPorCategoria.cartao.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) },
+        { 'Resumo': 'Imposto', 'Valor': relatorio.contasPorCategoria.imposto.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) },
+        { 'Resumo': 'Outro', 'Valor': relatorio.contasPorCategoria.outro.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) }
+      ];
+      
+      // Cria as planilhas
+      const wsContas = XLSX.utils.json_to_sheet(dadosContas);
+      const wsResumo = XLSX.utils.json_to_sheet(dadosResumo);
+      
+      // Cria o livro e adiciona as planilhas
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, wsResumo, 'Resumo');
+      XLSX.utils.book_append_sheet(wb, wsContas, 'Contas');
+      
+      // Define o nome do arquivo
+      const nomeArquivo = `MF_Financas_${filtro.mes || new Date().getMonth() + 1}_${filtro.ano || new Date().getFullYear()}.xlsx`;
+      
+      // Gera o arquivo
+      XLSX.writeFile(wb, nomeArquivo);
+      
+      toast.success('Arquivo Excel gerado com sucesso!');
     } catch (error) {
-      console.error('Erro ao gerar PDF:', error);
-      toast.error('Erro ao gerar o relatório PDF. Tente novamente.');
+      console.error('Erro ao exportar para Excel:', error);
+      toast.error('Erro ao exportar para Excel. Tente novamente.');
     }
   }
 
-  // Salvar filtro no localStorage quando mudar
-  useEffect(() => {
+  // Função para exportar os dados para PDF
+  function exportarParaPDF() {
     try {
-      localStorage.setItem('@MFFinancas:filtro', JSON.stringify(filtro));
+      // Se houver um filtro aplicado, usa as contas filtradas
+      // Caso contrário, usa todas as contas
+      const dados = contasFiltradas.length > 0 ? contasFiltradas : contas;
+      
+      if (dados.length === 0) {
+        toast.info('Não há dados para exportar.');
+        return;
+      }
+      
+      // Cria o relatório
+      const relatorio = gerarRelatorio(
+        filtro.mes || new Date().getMonth() + 1, 
+        filtro.ano || new Date().getFullYear()
+      );
+      
+      // Cria o documento PDF
+      const doc = new jsPDF();
+      
+      // Título
+      doc.setFontSize(18);
+      doc.text('Relatório Financeiro', 105, 15, { align: 'center' });
+      
+      doc.setFontSize(12);
+      const mesPorExtenso = format(new Date(relatorio.periodo.ano, relatorio.periodo.mes - 1, 1), 'MMMM', { locale: ptBR });
+      doc.text(
+        `${mesPorExtenso.charAt(0).toUpperCase() + mesPorExtenso.slice(1)} de ${relatorio.periodo.ano}`, 
+        105, 
+        22, 
+        { align: 'center' }
+      );
+      
+      // Resumo Financeiro
+      doc.setFontSize(14);
+      doc.text('Resumo Financeiro', 14, 35);
+      
+      doc.setFontSize(10);
+      doc.text('Total Pago:', 14, 45);
+      doc.text(relatorio.totalPago.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), 70, 45);
+      
+      doc.text('Total em Aberto:', 14, 52);
+      doc.text(relatorio.totalEmAberto.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), 70, 52);
+      
+      doc.text('Total Vencido:', 14, 59);
+      doc.text(relatorio.totalVencido.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), 70, 59);
+      
+      doc.text('Total Geral:', 14, 66);
+      doc.text((relatorio.totalPago + relatorio.totalEmAberto + relatorio.totalVencido).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), 70, 66);
+      
+      // Gastos por Categoria
+      doc.setFontSize(14);
+      doc.text('Gastos por Categoria', 14, 80);
+      
+      doc.setFontSize(10);
+      doc.text('Fixa:', 14, 90);
+      doc.text(relatorio.contasPorCategoria.fixa.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), 70, 90);
+      
+      doc.text('Variável:', 14, 97);
+      doc.text(relatorio.contasPorCategoria.variavel.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), 70, 97);
+      
+      doc.text('Cartão de Crédito:', 14, 104);
+      doc.text(relatorio.contasPorCategoria.cartao.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), 70, 104);
+      
+      doc.text('Imposto:', 14, 111);
+      doc.text(relatorio.contasPorCategoria.imposto.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), 70, 111);
+      
+      doc.text('Outro:', 14, 118);
+      doc.text(relatorio.contasPorCategoria.outro.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), 70, 118);
+      
+      // Lista de Contas
+      doc.setFontSize(14);
+      doc.text('Lista de Contas', 14, 135);
+      
+      // Cabeçalho da tabela
+      doc.setFontSize(9);
+      doc.text('Nome', 14, 145);
+      doc.text('Vencimento', 90, 145);
+      doc.text('Valor', 130, 145);
+      doc.text('Status', 160, 145);
+      
+      // Linha separadora
+      doc.line(14, 147, 196, 147);
+      
+      // Limita a 20 contas para evitar que o PDF fique muito grande
+      const contasListadas = dados.slice(0, 20);
+      
+      // Conteúdo da tabela
+      let y = 154;
+      contasListadas.forEach(conta => {
+        if (y > 280) {
+          // Se atingir o limite da página, adiciona uma nova página
+          doc.addPage();
+          
+          // Reseta a posição Y
+          y = 20;
+          
+          // Adiciona cabeçalho da tabela na nova página
+          doc.setFontSize(9);
+          doc.text('Nome', 14, y);
+          doc.text('Vencimento', 90, y);
+          doc.text('Valor', 130, y);
+          doc.text('Status', 160, y);
+          
+          // Linha separadora
+          doc.line(14, y + 2, 196, y + 2);
+          
+          // Atualiza a posição Y
+          y += 9;
+        }
+        
+        // Define a cor com base no status
+        if (conta.status === 'paga') {
+          doc.setTextColor(22, 163, 74); // Verde para contas pagas
+        } else if (conta.status === 'vencida') {
+          doc.setTextColor(239, 68, 68); // Vermelho para contas vencidas
+        } else {
+          doc.setTextColor(245, 158, 11); // Laranja para contas em aberto
+        }
+        
+        doc.text(conta.nome.substring(0, 25), 14, y);
+        doc.text(format(parseISO(conta.dataVencimento), 'dd/MM/yyyy'), 90, y);
+        doc.text(conta.valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), 130, y);
+        doc.text(
+          conta.status === 'paga' 
+            ? 'Paga' 
+            : conta.status === 'vencida' 
+              ? 'Vencida' 
+              : 'Em aberto', 
+          160, 
+          y
+        );
+        
+        // Reseta a cor do texto
+        doc.setTextColor(0, 0, 0);
+        
+        y += 7;
+      });
+      
+      // Se houver mais contas que não foram listadas
+      if (dados.length > 20) {
+        doc.setFontSize(8);
+        doc.text(`... e mais ${dados.length - 20} conta(s) não exibida(s) neste relatório.`, 14, y + 5);
+      }
+      
+      // Rodapé
+      doc.setFontSize(8);
+      doc.text('MF - Finanças | Relatório gerado em ' + format(new Date(), 'dd/MM/yyyy HH:mm'), 105, 285, { align: 'center' });
+      
+      // Define o nome do arquivo
+      const nomeArquivo = `MF_Financas_${filtro.mes || new Date().getMonth() + 1}_${filtro.ano || new Date().getFullYear()}.pdf`;
+      
+      // Salva o arquivo
+      doc.save(nomeArquivo);
+      
+      toast.success('Arquivo PDF gerado com sucesso!');
     } catch (error) {
-      console.error('Erro ao salvar filtro no localStorage:', error);
+      console.error('Erro ao exportar para PDF:', error);
+      toast.error('Erro ao exportar para PDF. Tente novamente.');
     }
-  }, [filtro]);
+  }
 
   return (
     <FinancasContext.Provider
@@ -587,10 +555,11 @@ export function FinancasProvider({ children }: FinancasProviderProps) {
         contasFiltradas,
         gerarRelatorio,
         exportarParaExcel,
-        exportarParaPDF
+        exportarParaPDF,
+        carregando
       }}
     >
       {children}
     </FinancasContext.Provider>
   );
-} 
+}
