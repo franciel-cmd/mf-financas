@@ -2,6 +2,7 @@ import React from 'react';
 import { Outlet, NavLink } from 'react-router-dom';
 import { FiHome, FiFileText, FiBarChart2, FiCalendar, FiCheckCircle, FiAlertCircle, FiPlusCircle } from 'react-icons/fi';
 import styled from 'styled-components';
+import UserMenu from './UserMenu';
 
 const LayoutContainer = styled.div`
   display: flex;
@@ -26,13 +27,23 @@ const Sidebar = styled.aside`
   }
 `;
 
+const LogoContainer = styled.div`
+  padding: 0 1.5rem 2rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 1.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  
+  @media (max-width: 768px) {
+    padding: 0 1rem 1rem;
+  }
+`;
+
 const Logo = styled.div`
   font-size: 1.5rem;
   font-weight: bold;
   color: var(--primary);
-  padding: 0 1.5rem 2rem;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 1.5rem;
 `;
 
 const NavList = styled.ul`
@@ -123,7 +134,10 @@ export default function Layout() {
   return (
     <LayoutContainer>
       <Sidebar>
-        <Logo>MF - Finanças</Logo>
+        <LogoContainer>
+          <Logo>MF - Finanças</Logo>
+          <UserMenu />
+        </LogoContainer>
         
         <NavList>
           <NavItem>

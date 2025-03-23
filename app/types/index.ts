@@ -29,4 +29,23 @@ export interface Relatorio {
     mes: number;
     ano: number;
   };
+}
+
+export interface Usuario {
+  id: string;
+  nome: string;
+  email: string;
+  senha: string; // Em uma aplicação real, nunca armazenaria a senha em texto simples
+  fotoPerfil?: string;
+}
+
+export interface CredenciaisLogin {
+  email: string;
+  senha: string;
+}
+
+export interface AuthState {
+  token: string;
+  usuario: Usuario;
+  isAuthenticated: boolean;
 } 
