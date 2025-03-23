@@ -5,6 +5,11 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
+// Log para debugging
+console.log('Variáveis de ambiente Supabase:');
+console.log('URL:', supabaseUrl ? 'Configurada' : 'NÃO CONFIGURADA');
+console.log('KEY:', supabaseAnonKey ? 'Configurada' : 'NÃO CONFIGURADA');
+
 if (!supabaseUrl || !supabaseAnonKey) {
   console.error('Supabase URL e/ou Chave Anônima não definidos!');
 }

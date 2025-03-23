@@ -32,6 +32,8 @@ interface AuthProviderProps {
 export const AuthContext = createContext({} as AuthContextData);
 
 export function AuthProvider({ children }: AuthProviderProps) {
+  console.log('AuthProvider sendo montado');
+  
   const [authData, setAuthData] = useState<AuthState>({
     token: '',
     usuario: null,
@@ -41,10 +43,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   // Verifica autenticação ao iniciar
   useEffect(() => {
+    console.log('useEffect de autenticação sendo executado');
     async function verificarAuth() {
       setLoading(true);
       try {
         const { usuario, token } = await verificarAutenticacao();
+        
+        console.log('Resultado da verificação de autenticação:', { usuario, token });
         
         if (token && usuario) {
           setAuthData({

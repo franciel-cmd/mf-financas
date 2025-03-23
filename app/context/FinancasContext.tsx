@@ -42,26 +42,33 @@ interface FinancasProviderProps {
 export const FinancasContext = createContext({} as FinancasContextData);
 
 export function FinancasProvider({ children }: FinancasProviderProps) {
+  console.log('FinancasProvider sendo montado');
+  
   // Referência para o último dia em que as contas foram verificadas
   const ultimaVerificacaoRef = useRef(new Date());
   const { usuario, isAuthenticated } = useAuth();
   const [carregando, setCarregando] = useState(false);
   
   const [contas, setContas] = useState<Conta[]>([]);
-
+  
+  // Filtro padrão: mês e ano atual
   const [filtro, setFiltro] = useState<Filtro>(() => {
     try {
-      const storedFiltro = localStorage.getItem('@MFFinancas:filtro');
-      if (storedFiltro) {
-        return JSON.parse(storedFiltro);
+      const filtroSalvo = localStorage.getItem('@MFFinancas:filtro');
+      if (filtroSalvo) {
+        return JSON.parse(filtroSalvo);
       }
+      return {
+        mes: new Date().getMonth() + 1, // Janeiro é 0, então soma 1
+        ano: new Date().getFullYear()
+      };
     } catch (error) {
-      console.error('Erro ao carregar filtro do localStorage:', error);
+      console.error('Erro ao recuperar filtro do localStorage:', error);
+      return {
+        mes: new Date().getMonth() + 1,
+        ano: new Date().getFullYear()
+      };
     }
-    return {
-      mes: new Date().getMonth() + 1,
-      ano: new Date().getFullYear()
-    };
   });
 
   // Carregar contas quando o usuário estiver autenticado
