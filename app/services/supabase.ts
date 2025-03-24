@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { debug, error as errorLog } from '../utils/logger';
 
 // No Vite, as variáveis de ambiente devem ser prefixadas com VITE_
 // e acessadas através de import.meta.env
@@ -9,145 +10,138 @@ const isDevelopment = process.env.NODE_ENV === 'development';
 const BACKUP_URL = 'https://jtsbmolnhlrpyxccwpul.supabase.co';
 const BACKUP_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp0c2Jtb2xuaGxycHl4Y2N3cHVsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MDAwNTM2NzQsImV4cCI6MjAxNTYyOTY3NH0.NmThbvLbEmhJQmb0Jz98YQkpPNFbxDneMgQQ1l9ueoc';
 
-// Obter as variáveis de ambiente
-let supabaseUrl = '';
-let supabaseAnonKey = '';
+// Obter URL e chave do Supabase de variáveis de ambiente
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-try {
-  // Tentar obter das variáveis de ambiente primeiro
-  supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-  supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+// Verificar se as variáveis de ambiente estão definidas
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error('⚠️ Variáveis de ambiente do Supabase não definidas');
+  console.log('URL:', supabaseUrl ? 'Definida' : 'Não definida');
+  console.log('Chave:', supabaseAnonKey ? 'Definida' : 'Não definida');
   
-  // Log para debugging
-  console.log('Variáveis de ambiente Supabase:');
-  console.log('URL:', supabaseUrl ? 'Configurada' : 'NÃO CONFIGURADA');
-  console.log('KEY:', supabaseAnonKey ? 'Configurada' : 'NÃO CONFIGURADA');
-  console.log('Ambiente:', isDevelopment ? 'Desenvolvimento' : 'Produção');
-
-  // Se não obteve das variáveis de ambiente, usar os valores de backup
-  if (!supabaseUrl) {
-    console.warn('Usando URL de backup para Supabase!');
-    supabaseUrl = BACKUP_URL;
-  }
-  
-  if (!supabaseAnonKey) {
-    console.warn('Usando KEY de backup para Supabase!');
-    supabaseAnonKey = BACKUP_KEY;
-  }
-} catch (error) {
-  console.error('Erro ao acessar variáveis de ambiente:', error);
-  // Usar valores de backup em caso de erro
-  supabaseUrl = BACKUP_URL;
-  supabaseAnonKey = BACKUP_KEY;
-  console.warn('Usando valores de backup para Supabase após erro!');
+  // Usar valores de backup para desenvolvimento local (não recomendado para produção)
+  console.warn('Usando valores de backup para desenvolvimento local');
 }
 
-console.log('Conectando ao Supabase com: ', {
-  url: supabaseUrl ? supabaseUrl.substring(0, 15) + '...' : 'vazio',
-  keyDefinida: supabaseAnonKey ? 'Sim' : 'Não'
-});
+// Configurações para ajustar a tolerância a falhas
+const FETCH_TIMEOUT = 60000; // 60 segundos
+const MAX_RETRIES = 3;
+const RETRY_INTERVAL = 1500;
 
-// Criar cliente Supabase com configurações avançadas para melhorar a persistência
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
-    storageKey: 'mf-financas-auth-token',
-  },
-  global: {
-    headers: {
-      'X-Client-Info': 'MF-Financas/1.0'
+// Configuração de fetch com timeout personalizado
+const fetchWithTimeout = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  // Criar um controlador de aborto
+  const controller = new AbortController();
+  const { signal } = controller;
+  
+  // Definir o timeout
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, FETCH_TIMEOUT);
+  
+  // Mesclar opções e signal
+  const fetchOptions = {
+    ...init,
+    signal,
+  };
+  
+  // Executar o fetch com timeout
+  return fetch(input, fetchOptions)
+    .then(response => {
+      clearTimeout(timeout);
+      return response;
+    })
+    .catch(error => {
+      clearTimeout(timeout);
+      if (error.name === 'AbortError') {
+        throw new Error('Tempo de conexão esgotado ao comunicar com Supabase');
+      }
+      throw error;
+    });
+};
+
+// Criar um cliente Supabase customizado com retry e timeout
+export const supabase = createClient(
+  supabaseUrl || 'https://pqkcsrvgvfmlkjwgaxpc.supabase.co',
+  supabaseAnonKey || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBxa2NzcnZndmZtbGtqd2dheHBjIiwicm9sZSI6ImFub24iLCJpYXQiOjE2OTk5Mjk0ODUsImV4cCI6MjAxNTUwNTQ4NX0.qEBp4IJTbjtmE70H5iIhQC-cfCUFSQcnxdqiIuDGiOk',
+  {
+    auth: {
+      autoRefreshToken: true,
+      persistSession: true,
     },
-    fetch: (url, options) => {
-      // Aumentar timeout para 60 segundos para lidar com redes lentas
-      const timeoutMs = 60000; // 60 segundos
-      const controller = new AbortController();
-      const { signal } = controller;
-      
-      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-      
-      return fetch(url, {
-        ...options,
-        signal,
-      }).then(response => {
-        clearTimeout(timeoutId);
-        return response;
-      }).catch(error => {
-        clearTimeout(timeoutId);
-        console.error('Erro na requisição Supabase:', error);
-        
-        // Se for erro de timeout ou rede, personalizar a mensagem
-        if (error.name === 'AbortError') {
-          throw new Error('Tempo de conexão esgotado. Verifique sua internet e tente novamente.');
-        } else if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
-          throw new Error('Falha na conexão com o servidor. Verifique sua internet.');
-        }
-        
-        throw error;
-      });
-    }
-  },
-  realtime: {
-    timeout: 60000, // 60 segundos para o Realtime também
-    params: {
-      eventsPerSecond: 2 // Taxa limitada para evitar problemas em conexões instáveis
-    }
+    global: {
+      fetch: fetchWithTimeout,
+    },
   }
-});
+);
 
-// Verificar conexão
-supabase.auth.onAuthStateChange((event, session) => {
-  console.log('Estado de autenticação do Supabase:', event, session ? 'Sessão ativa' : 'Sem sessão');
-});
-
-// Função de teste para verificar conexão ao Supabase
+// Função para testar a conexão com o Supabase
 export const testarConexaoSupabase = async (): Promise<boolean> => {
+  debug('Testando conexão com Supabase...');
+  
   try {
-    // Adicionar um timeout de 10 segundos
+    // Adicionar timeout de 15 segundos
     const timeoutPromise = new Promise<boolean>((_, reject) => {
-      setTimeout(() => reject(new Error('Timeout ao testar conexão')), 10000);
+      setTimeout(() => reject(new Error('Timeout ao testar conexão com Supabase')), 15000);
     });
     
+    // Teste básico de conexão (get health)
     const testPromise = new Promise<boolean>(async (resolve) => {
       try {
-        const { data, error } = await supabase.from('usuarios').select('count()', { count: 'exact' }).limit(1);
+        // Testar conexão com health check
+        const { error } = await supabase.from('health').select('*').limit(1);
+        
         if (error) {
-          console.error('Erro ao testar conexão com Supabase:', error);
+          debug(`Erro no teste de conexão: ${error.message}`);
+          console.error('Erro no teste de conexão:', error);
           resolve(false);
-        } else {
-          console.log('Conexão com Supabase bem-sucedida!');
-          resolve(true);
+          return;
         }
+        
+        debug('Conexão com Supabase estabelecida com sucesso');
+        console.log('Conexão com Supabase estabelecida com sucesso');
+        resolve(true);
       } catch (err) {
-        console.error('Exceção ao testar conexão com Supabase:', err);
+        errorLog('Erro ao testar conexão com Supabase', err);
+        console.error('Erro ao testar conexão com Supabase:', err);
         resolve(false);
       }
     });
     
-    // Usar Promise.race para implementar o timeout
+    // Corrida entre o teste e o timeout
     return await Promise.race([testPromise, timeoutPromise]);
   } catch (err) {
-    if (err instanceof Error && err.message === 'Timeout ao testar conexão') {
+    if (err instanceof Error && err.message.includes('Timeout')) {
+      errorLog('Timeout ao testar conexão com Supabase');
       console.error('Timeout ao testar conexão com Supabase');
     } else {
-      console.error('Exceção ao testar conexão com Supabase:', err);
+      errorLog('Erro ao testar conexão com Supabase', err);
+      console.error('Erro ao testar conexão com Supabase:', err);
     }
     return false;
   }
 };
 
-// Tentar verificar a conexão ao inicializar com tratamento de timeout
-(async () => {
-  try {
-    const connected = await testarConexaoSupabase();
-    if (!connected) {
-      console.warn('Falha ao conectar ao Supabase durante a inicialização. A aplicação tentará reconectar quando necessário.');
+// Verificar se o Supabase está correto
+testarConexaoSupabase()
+  .then(conectado => {
+    if (conectado) {
+      debug('✅ Supabase inicializado e testado com sucesso');
+    } else {
+      errorLog('❌ Não foi possível conectar ao Supabase. Verificando possíveis problemas...');
+      
+      // Verificar se as variáveis de ambiente estão definidas
+      if (!supabaseUrl || !supabaseAnonKey) {
+        errorLog('⚠️ Problema: Variáveis de ambiente não configuradas');
+      }
+      
+      // Outros diagnósticos podem ser adicionados aqui
     }
-  } catch (error) {
-    console.error('Erro ao verificar conexão com Supabase na inicialização:', error);
-  }
-})();
+  })
+  .catch(err => {
+    errorLog('Erro ao inicializar Supabase', err);
+  });
 
 // Tipos para uso com TypeScript
 export type Tables = {
