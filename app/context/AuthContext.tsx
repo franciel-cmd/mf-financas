@@ -72,7 +72,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const resposta = await verificarAutenticacao();
       console.log('Resposta de verificação de autenticação:', resposta ? 'Autenticado' : 'Não autenticado');
       
-      if (resposta && resposta.usuario && resposta.token) {
+      if (resposta && typeof resposta === 'object' && 'usuario' in resposta && 'token' in resposta && resposta.usuario && resposta.token) {
         setAuthData({
           usuario: resposta.usuario,
           token: resposta.token,
@@ -123,8 +123,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.log('Iniciando processo de login para:', email);
       const resposta = await loginUsuario(email, senha);
       
-      // Verifica se resposta não é um Error e tem os campos necessários
-      if (resposta && 'usuario' in resposta && 'token' in resposta && resposta.usuario && resposta.token) {
+      // Verificar se resposta é um objeto e tem as propriedades necessárias
+      if (resposta && typeof resposta === 'object' && 'usuario' in resposta && 'token' in resposta && resposta.usuario && resposta.token) {
         console.log('Login bem-sucedido');
         setAuthData({
           usuario: resposta.usuario,
@@ -185,8 +185,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       const resposta = await registrarUsuario(nome, email, senha, confirmacaoSenha);
       
-      // Verifica se resposta não é um Error e tem os campos necessários
-      if (resposta && 'usuario' in resposta && 'token' in resposta && resposta.usuario && resposta.token) {
+      // Verificar se resposta é um objeto e tem as propriedades necessárias
+      if (resposta && typeof resposta === 'object' && 'usuario' in resposta && 'token' in resposta && resposta.usuario && resposta.token) {
         console.log('Cadastro bem-sucedido');
         setAuthData({
           usuario: resposta.usuario,

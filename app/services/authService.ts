@@ -126,65 +126,127 @@ export const registrarUsuario = async (
     
     console.log('Dados validados, prosseguindo com registro');
     
-    // Registrar usuário no Supabase Auth
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email,
-      password: senha,
-      options: {
-        data: {
-          nome
+    // Tentar criar usuário com retry
+    let retries = 2;
+    let lastError = null;
+    
+    while (retries >= 0) {
+      try {
+        // Registrar usuário no Supabase Auth
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+          email,
+          password: senha,
+          options: {
+            data: {
+              nome
+            }
+          }
+        });
+        
+        if (authError) {
+          // Se for erro de rede, tentar novamente
+          if (
+            authError.message.includes('Failed to fetch') || 
+            authError.message.includes('network request failed') ||
+            authError.message.includes('Tempo de conexão')
+          ) {
+            lastError = authError;
+            retries--;
+            if (retries >= 0) {
+              console.log(`Tentando novamente registro. Tentativas restantes: ${retries}`);
+              // Esperar um pouco antes de tentar novamente
+              await new Promise(resolve => setTimeout(resolve, 1500));
+              continue;
+            }
+          }
+          throw authError;
+        }
+        
+        if (!authData.user || !authData.session) {
+          const mensagem = 'Falha ao criar usuário (dados incompletos)';
+          logger.error(mensagem);
+          toast.error(mensagem);
+          throw new Error(mensagem);
+        }
+        
+        logger.info('Usuário registrado com sucesso', { userId: authData.user.id });
+        console.log('Usuário registrado com sucesso:', authData.user.id);
+        
+        // Criar perfil do usuário na tabela usuarios
+        const { error: profileError } = await supabase
+          .from('usuarios')
+          .insert({
+            id: authData.user.id,
+            nome,
+            email
+          });
+        
+        if (profileError) {
+          logger.error('Erro ao criar perfil do usuário', profileError);
+          console.error('Erro ao criar perfil do usuário:', profileError);
+          // Não impede o login, apenas loga o erro
+        }
+        
+        toast.success('Usuário cadastrado com sucesso!');
+        
+        // Retorna usuário e token
+        return {
+          usuario: {
+            id: authData.user.id,
+            nome,
+            email
+          },
+          token: authData.session.access_token
+        };
+      } catch (err) {
+        lastError = err;
+        
+        // Se for erro de rede, tentamos novamente
+        if (
+          err instanceof Error && (
+            err.message.includes('Failed to fetch') || 
+            err.message.includes('network request failed') ||
+            err.message.includes('Tempo de conexão')
+          )
+        ) {
+          retries--;
+          if (retries >= 0) {
+            console.log(`Tentando novamente registro. Tentativas restantes: ${retries}`);
+            // Esperar um pouco antes de tentar novamente
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            continue;
+          }
+        } else {
+          // Outros erros não tentamos novamente
+          break;
         }
       }
-    });
-    
-    if (authError) {
-      throw handleAuthError(authError);
     }
     
-    if (!authData.user || !authData.session) {
-      const mensagem = 'Falha ao criar usuário (dados incompletos)';
-      logger.error(mensagem);
-      toast.error(mensagem);
-      throw new Error(mensagem);
+    // Se chegamos aqui com lastError, significa que esgotamos as tentativas
+    if (lastError) {
+      const mensagemErro = handleAuthError(lastError);
+      toast.error(mensagemErro);
+      errorLog('Erro no registro após tentativas:', lastError);
+      return { error: lastError, usuario: null, token: null };
     }
     
-    logger.info('Usuário registrado com sucesso', { userId: authData.user.id });
-    console.log('Usuário registrado com sucesso:', authData.user.id);
+    // Caso de erro desconhecido
+    toast.error('Erro ao realizar cadastro');
+    return { error: new Error('Erro desconhecido no registro'), usuario: null, token: null };
     
-    // Criar perfil do usuário na tabela usuarios
-    const { error: profileError } = await supabase
-      .from('usuarios')
-      .insert({
-        id: authData.user.id,
-        nome,
-        email
-      });
-    
-    if (profileError) {
-      logger.error('Erro ao criar perfil do usuário', profileError);
-      console.error('Erro ao criar perfil do usuário:', profileError);
-      // Não impede o login, apenas loga o erro
-    }
-    
-    toast.success('Usuário cadastrado com sucesso!');
-    
-    // Retorna usuário e token
-    return {
-      usuario: {
-        id: authData.user.id,
-        nome,
-        email
-      },
-      token: authData.session.access_token
-    };
   } catch (error) {
     // Se for um erro já tratado, apenas repassa
     if (error instanceof Error) {
-      throw error;
+      const mensagemErro = error.message;
+      toast.error(mensagemErro);
+      return { error, usuario: null, token: null };
     }
     
     // Caso contrário, trata como erro genérico
-    return handleAuthError(error);
+    const mensagemErro = handleAuthError(error);
+    toast.error(mensagemErro);
+    return { error, usuario: null, token: null };
   }
 };
 
@@ -203,56 +265,116 @@ export const loginUsuario = async (email: string, senha: string) => {
       throw new Error(mensagensErro);
     }
     
-    // Fazer login no Supabase Auth
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password: senha
-    });
+    // Tentar login com retry em caso de erro de rede
+    let retries = 2;
+    let lastError = null;
     
-    if (error) {
-      throw handleAuthError(error);
+    while (retries >= 0) {
+      try {
+        // Fazer login no Supabase Auth
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password: senha
+        });
+        
+        if (error) {
+          // Se for erro de rede, tentar novamente
+          if (
+            error.message.includes('Failed to fetch') || 
+            error.message.includes('network request failed') ||
+            error.message.includes('Tempo de conexão')
+          ) {
+            lastError = error;
+            retries--;
+            if (retries >= 0) {
+              console.log(`Tentando novamente login. Tentativas restantes: ${retries}`);
+              // Esperar um pouco antes de tentar novamente
+              await new Promise(resolve => setTimeout(resolve, 1500));
+              continue;
+            }
+          }
+          throw error;
+        }
+        
+        if (!data.user || !data.session) {
+          const mensagem = 'Falha no login (dados incompletos)';
+          logger.error(mensagem);
+          toast.error(mensagem);
+          throw new Error(mensagem);
+        }
+        
+        logger.info('Login realizado com sucesso', { userId: data.user.id });
+        console.log('Login realizado com sucesso:', data.user.id);
+        
+        // Buscar dados do usuário na tabela usuarios
+        const { data: userData, error: userError } = await supabase
+          .from('usuarios')
+          .select('*')
+          .eq('id', data.user.id)
+          .single();
+        
+        if (userError) {
+          logger.error('Erro ao buscar dados do usuário', userError);
+          console.warn('Erro ao buscar dados do usuário, usando dados do Auth:', userError);
+        }
+        
+        const nome = userData?.nome || data.user.user_metadata?.nome || 'Usuário';
+        
+        return {
+          usuario: {
+            id: data.user.id,
+            nome,
+            email: data.user.email as string
+          },
+          token: data.session.access_token
+        };
+      } catch (err) {
+        lastError = err;
+        
+        // Se for erro de rede, tentamos novamente
+        if (
+          err instanceof Error && (
+            err.message.includes('Failed to fetch') || 
+            err.message.includes('network request failed') ||
+            err.message.includes('Tempo de conexão')
+          )
+        ) {
+          retries--;
+          if (retries >= 0) {
+            console.log(`Tentando novamente login. Tentativas restantes: ${retries}`);
+            // Esperar um pouco antes de tentar novamente
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            continue;
+          }
+        } else {
+          // Outros erros não tentamos novamente
+          break;
+        }
+      }
     }
     
-    if (!data.user || !data.session) {
-      const mensagem = 'Falha no login (dados incompletos)';
-      logger.error(mensagem);
-      toast.error(mensagem);
-      throw new Error(mensagem);
+    // Se chegamos aqui com lastError, significa que esgotamos as tentativas
+    if (lastError) {
+      const mensagemErro = handleAuthError(lastError);
+      toast.error(mensagemErro);
+      errorLog('Erro no login após tentativas:', lastError);
+      return { error: lastError, usuario: null, token: null };
     }
     
-    logger.info('Login realizado com sucesso', { userId: data.user.id });
-    console.log('Login realizado com sucesso:', data.user.id);
-    
-    // Buscar dados do usuário na tabela usuarios
-    const { data: userData, error: userError } = await supabase
-      .from('usuarios')
-      .select('*')
-      .eq('id', data.user.id)
-      .single();
-    
-    if (userError) {
-      logger.error('Erro ao buscar dados do usuário', userError);
-      console.warn('Erro ao buscar dados do usuário, usando dados do Auth:', userError);
-    }
-    
-    const nome = userData?.nome || data.user.user_metadata?.nome || 'Usuário';
-    
-    return {
-      usuario: {
-        id: data.user.id,
-        nome,
-        email: data.user.email as string
-      },
-      token: data.session.access_token
-    };
+    toast.error('Erro ao realizar login');
+    return { error: new Error('Erro desconhecido no login'), usuario: null, token: null };
   } catch (error) {
     // Se for um erro já tratado, apenas repassa
     if (error instanceof Error) {
-      throw error;
+      const mensagemErro = error.message;
+      toast.error(mensagemErro);
+      return { error, usuario: null, token: null };
     }
     
     // Caso contrário, trata como erro genérico
-    return handleAuthError(error);
+    const mensagemErro = handleAuthError(error);
+    toast.error(mensagemErro);
+    return { error, usuario: null, token: null };
   }
 };
 
@@ -285,46 +407,100 @@ export const logoutUsuario = async () => {
 // Função para verificar se o usuário está autenticado
 export const verificarAutenticacao = async () => {
   try {
-    const { data: sessionData, error } = await supabase.auth.getSession();
+    // Tentar verificar autenticação com retry
+    let retries = 1; // Menos tentativas para esta operação que é constante
+    let lastError = null;
     
-    if (error) {
-      logger.error('Erro ao verificar autenticação', error);
-      console.error('Erro ao verificar autenticação:', error);
+    while (retries >= 0) {
+      try {
+        const { data: sessionData, error } = await supabase.auth.getSession();
+        
+        if (error) {
+          // Se for erro de rede, tentar novamente
+          if (
+            error.message.includes('Failed to fetch') || 
+            error.message.includes('network request failed') ||
+            error.message.includes('Tempo de conexão')
+          ) {
+            lastError = error;
+            retries--;
+            if (retries >= 0) {
+              console.log(`Tentando novamente verificação de autenticação. Tentativas restantes: ${retries}`);
+              // Esperar menos tempo para esta operação
+              await new Promise(resolve => setTimeout(resolve, 1000));
+              continue;
+            }
+          }
+          throw error;
+        }
+        
+        if (!sessionData.session) {
+          logger.info('Usuário não autenticado (sem sessão)');
+          console.log('Usuário não autenticado (sem sessão)');
+          return { usuario: null, token: null };
+        }
+        
+        // Buscar dados do usuário na tabela usuarios
+        const { data: userData, error: userError } = await supabase
+          .from('usuarios')
+          .select('*')
+          .eq('id', sessionData.session.user.id)
+          .single();
+        
+        if (userError) {
+          logger.warning('Erro ao buscar dados de perfil, usando dados do Auth', userError);
+          console.warn('Erro ao buscar dados de perfil, usando dados do Auth:', userError);
+        }
+        
+        const user = sessionData.session.user;
+        const nome = userData?.nome || user.user_metadata?.nome || 'Usuário';
+        
+        logger.info('Usuário autenticado', { userId: user.id });
+        console.log('Usuário autenticado:', user.id, nome);
+        
+        return {
+          usuario: {
+            id: user.id,
+            nome,
+            email: user.email as string
+          },
+          token: sessionData.session.access_token || null
+        };
+      } catch (err) {
+        lastError = err;
+        
+        // Se for erro de rede, tentamos novamente
+        if (
+          err instanceof Error && (
+            err.message.includes('Failed to fetch') || 
+            err.message.includes('network request failed') ||
+            err.message.includes('Tempo de conexão')
+          )
+        ) {
+          retries--;
+          if (retries >= 0) {
+            console.log(`Tentando novamente verificação. Tentativas restantes: ${retries}`);
+            // Esperar um pouco antes de tentar novamente
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            continue;
+          }
+        } else {
+          // Outros erros não tentamos novamente
+          break;
+        }
+      }
+    }
+    
+    // Se chegamos aqui com lastError, significa que esgotamos as tentativas
+    if (lastError) {
+      const mensagemErro = handleAuthError(lastError);
+      console.error(`Erro na verificação de autenticação: ${mensagemErro}`);
+      errorLog('Erro na verificação de autenticação:', lastError);
+      // Não mostramos toast aqui para não irritar o usuário em operações de fundo
       return { usuario: null, token: null };
     }
     
-    if (!sessionData.session) {
-      logger.info('Usuário não autenticado (sem sessão)');
-      console.log('Usuário não autenticado (sem sessão)');
-      return { usuario: null, token: null };
-    }
-    
-    // Buscar dados do usuário na tabela usuarios
-    const { data: userData, error: userError } = await supabase
-      .from('usuarios')
-      .select('*')
-      .eq('id', sessionData.session.user.id)
-      .single();
-    
-    if (userError) {
-      logger.warning('Erro ao buscar dados de perfil, usando dados do Auth', userError);
-      console.warn('Erro ao buscar dados de perfil, usando dados do Auth:', userError);
-    }
-    
-    const user = sessionData.session.user;
-    const nome = userData?.nome || user.user_metadata?.nome || 'Usuário';
-    
-    logger.info('Usuário autenticado', { userId: user.id });
-    console.log('Usuário autenticado:', user.id, nome);
-    
-    return {
-      usuario: {
-        id: user.id,
-        nome,
-        email: user.email as string
-      },
-      token: sessionData.session.access_token || null
-    };
+    return { usuario: null, token: null };
   } catch (error) {
     logger.error('Erro ao verificar autenticação', error);
     console.error('Erro ao verificar autenticação:', error);
