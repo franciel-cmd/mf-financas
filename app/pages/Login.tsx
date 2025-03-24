@@ -253,7 +253,7 @@ export default function Login() {
       let success;
       
       if (isLogin) {
-        success = await login({ email, senha });
+        success = await login(email, senha);
       } else {
         success = await cadastrar(nome, email, senha, confirmaSenha);
       }

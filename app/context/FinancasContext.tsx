@@ -46,7 +46,9 @@ export function FinancasProvider({ children }: FinancasProviderProps) {
   
   // Referência para o último dia em que as contas foram verificadas
   const ultimaVerificacaoRef = useRef(new Date());
-  const { usuario, isAuthenticated } = useAuth();
+
+  const { usuario } = useAuth();
+  const isAuthenticated = !!usuario; // Verifica se o usuário está autenticado
   const [carregando, setCarregando] = useState(false);
   
   const [contas, setContas] = useState<Conta[]>([]);

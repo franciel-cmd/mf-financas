@@ -17,6 +17,12 @@ interface AuthState {
   carregando: boolean;
 }
 
+// Resultado esperado das funções de autenticação
+interface AuthResult {
+  usuario: Usuario | null;
+  token: string | null;
+}
+
 interface AuthContextData {
   usuario: Usuario | null;
   token: string | null;
@@ -117,7 +123,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.log('Iniciando processo de login para:', email);
       const resposta = await loginUsuario(email, senha);
       
-      if (resposta && resposta.usuario && resposta.token) {
+      // Verifica se resposta não é um Error e tem os campos necessários
+      if (resposta && 'usuario' in resposta && 'token' in resposta && resposta.usuario && resposta.token) {
         console.log('Login bem-sucedido');
         setAuthData({
           usuario: resposta.usuario,
@@ -178,7 +185,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       const resposta = await registrarUsuario(nome, email, senha, confirmacaoSenha);
       
-      if (resposta && resposta.usuario && resposta.token) {
+      // Verifica se resposta não é um Error e tem os campos necessários
+      if (resposta && 'usuario' in resposta && 'token' in resposta && resposta.usuario && resposta.token) {
         console.log('Cadastro bem-sucedido');
         setAuthData({
           usuario: resposta.usuario,
