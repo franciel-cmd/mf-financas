@@ -59,9 +59,40 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     headers: {
       'X-Client-Info': 'MF-Financas/1.0'
     },
+    fetch: (url, options) => {
+      // Aumentar timeout para 60 segundos para lidar com redes lentas
+      const timeoutMs = 60000; // 60 segundos
+      const controller = new AbortController();
+      const { signal } = controller;
+      
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      
+      return fetch(url, {
+        ...options,
+        signal,
+      }).then(response => {
+        clearTimeout(timeoutId);
+        return response;
+      }).catch(error => {
+        clearTimeout(timeoutId);
+        console.error('Erro na requisição Supabase:', error);
+        
+        // Se for erro de timeout ou rede, personalizar a mensagem
+        if (error.name === 'AbortError') {
+          throw new Error('Tempo de conexão esgotado. Verifique sua internet e tente novamente.');
+        } else if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+          throw new Error('Falha na conexão com o servidor. Verifique sua internet.');
+        }
+        
+        throw error;
+      });
+    }
   },
   realtime: {
-    timeout: 30000
+    timeout: 60000, // 60 segundos para o Realtime também
+    params: {
+      eventsPerSecond: 2 // Taxa limitada para evitar problemas em conexões instáveis
+    }
   }
 });
 
@@ -73,21 +104,50 @@ supabase.auth.onAuthStateChange((event, session) => {
 // Função de teste para verificar conexão ao Supabase
 export const testarConexaoSupabase = async (): Promise<boolean> => {
   try {
-    const { data, error } = await supabase.from('usuarios').select('count()', { count: 'exact' }).limit(1);
-    if (error) {
-      console.error('Erro ao testar conexão com Supabase:', error);
-      return false;
-    }
-    console.log('Conexão com Supabase bem-sucedida!');
-    return true;
+    // Adicionar um timeout de 10 segundos
+    const timeoutPromise = new Promise<boolean>((_, reject) => {
+      setTimeout(() => reject(new Error('Timeout ao testar conexão')), 10000);
+    });
+    
+    const testPromise = new Promise<boolean>(async (resolve) => {
+      try {
+        const { data, error } = await supabase.from('usuarios').select('count()', { count: 'exact' }).limit(1);
+        if (error) {
+          console.error('Erro ao testar conexão com Supabase:', error);
+          resolve(false);
+        } else {
+          console.log('Conexão com Supabase bem-sucedida!');
+          resolve(true);
+        }
+      } catch (err) {
+        console.error('Exceção ao testar conexão com Supabase:', err);
+        resolve(false);
+      }
+    });
+    
+    // Usar Promise.race para implementar o timeout
+    return await Promise.race([testPromise, timeoutPromise]);
   } catch (err) {
-    console.error('Exceção ao testar conexão com Supabase:', err);
+    if (err instanceof Error && err.message === 'Timeout ao testar conexão') {
+      console.error('Timeout ao testar conexão com Supabase');
+    } else {
+      console.error('Exceção ao testar conexão com Supabase:', err);
+    }
     return false;
   }
 };
 
-// Tentar verificar a conexão ao inicializar
-testarConexaoSupabase();
+// Tentar verificar a conexão ao inicializar com tratamento de timeout
+(async () => {
+  try {
+    const connected = await testarConexaoSupabase();
+    if (!connected) {
+      console.warn('Falha ao conectar ao Supabase durante a inicialização. A aplicação tentará reconectar quando necessário.');
+    }
+  } catch (error) {
+    console.error('Erro ao verificar conexão com Supabase na inicialização:', error);
+  }
+})();
 
 // Tipos para uso com TypeScript
 export type Tables = {

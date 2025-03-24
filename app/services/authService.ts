@@ -6,6 +6,7 @@ import * as logger from '../utils/logger';
 import { validateAndSanitize, commonSchemas, sanitizeString } from '../utils/validators';
 import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
+import { debug, error as errorLog } from '../utils/logger';
 
 // Esquema de validação para registro
 const registroSchema = z.object({
@@ -27,46 +28,72 @@ const loginSchema = z.object({
 // Função para verificar a conexão com Supabase Auth
 export const testarConexaoAuth = async (): Promise<boolean> => {
   try {
-    logger.info('Testando conexão com Supabase Auth');
-    const { data, error } = await supabase.auth.getSession();
+    // Adicionar timeout de 10 segundos
+    const timeoutPromise = new Promise<boolean>((_, reject) => {
+      setTimeout(() => reject(new Error('Timeout ao testar conexão com Auth')), 10000);
+    });
     
-    if (error) {
-      logger.error('Falha na conexão com Supabase Auth', error);
-      return false;
+    const testPromise = new Promise<boolean>(async (resolve) => {
+      try {
+        const session = await supabase.auth.getSession();
+        console.log('Teste de conexão Auth:', session ? 'Sucesso' : 'Falha');
+        resolve(!!session);
+      } catch (err) {
+        console.error('Erro ao verificar sessão:', err);
+        resolve(false);
+      }
+    });
+    
+    return await Promise.race([testPromise, timeoutPromise]);
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('Timeout')) {
+      console.error('Timeout ao testar conexão com Auth');
+    } else {
+      console.error('Erro ao testar conexão com Auth:', err);
     }
-    
-    logger.info('Conexão com Supabase Auth bem-sucedida');
-    console.log('Status da sessão:', data.session ? 'Ativa' : 'Inativa');
-    return true;
-  } catch (error) {
-    logger.error('Erro ao testar conexão com Supabase Auth', error);
-    console.error('Erro ao testar conexão com Supabase Auth:', error);
     return false;
   }
 };
 
 // Função para lidar com erros de autenticação
-const handleAuthError = (error: any, mensagem: string) => {
-  logger.error(mensagem, error);
-  console.error(mensagem, error);
-  
-  if (error.message?.includes('Email not confirmed')) {
-    toast.error('Email não confirmado. Verifique sua caixa de entrada.');
-    return new Error('Email não confirmado');
+const handleAuthError = (error: any): string => {
+  const errorCode = error?.code || error?.message || 'Erro desconhecido';
+  debug(`Erro de autenticação: ${errorCode}`);
+
+  // Verificar se é um erro de rede
+  if (
+    error?.message?.includes('Failed to fetch') || 
+    error?.message?.includes('NetworkError') || 
+    error?.message?.includes('network request failed') ||
+    error?.message?.includes('Tempo de conexão esgotado') ||
+    error?.message?.includes('Falha na conexão')
+  ) {
+    return 'Erro de conexão com o servidor. Verifique sua internet.';
   }
-  
-  if (error.message?.includes('Invalid login credentials')) {
-    toast.error('Credenciais inválidas. Verifique email e senha.');
-    return new Error('Credenciais inválidas');
+
+  // Erros específicos do Supabase
+  switch (errorCode) {
+    case 'auth/user-not-found':
+    case 'invalid_grant':
+    case 'P0001':
+    case 'auth/invalid-email':
+    case 'auth/invalid-credential':
+      return 'Email ou senha inválidos';
+    case 'auth/email-already-in-use':
+    case 'auth/account-exists-with-different-credential':
+      return 'Este email já está em uso';
+    case 'auth/too-many-requests':
+      return 'Muitas tentativas. Tente novamente mais tarde';
+    case 'auth/network-request-failed':
+      return 'Erro de conexão com o servidor. Verifique sua internet.';
+    case 'auth/popup-closed-by-user':
+      return 'Login cancelado pelo usuário';
+    case 'User already registered':
+    case 'Email already in use':
+      return 'Este email já está cadastrado';
+    default:
+      return 'Erro ao realizar autenticação. Tente novamente.';
   }
-  
-  if (error.message?.includes('User already registered')) {
-    toast.error('Email já cadastrado. Tente fazer login.');
-    return new Error('Email já cadastrado');
-  }
-  
-  toast.error(mensagem);
-  return new Error(mensagem);
 };
 
 // Função para registrar um novo usuário
@@ -111,7 +138,7 @@ export const registrarUsuario = async (
     });
     
     if (authError) {
-      throw handleAuthError(authError, 'Erro ao registrar usuário');
+      throw handleAuthError(authError);
     }
     
     if (!authData.user || !authData.session) {
@@ -157,7 +184,7 @@ export const registrarUsuario = async (
     }
     
     // Caso contrário, trata como erro genérico
-    return handleAuthError(error, 'Erro ao registrar usuário');
+    return handleAuthError(error);
   }
 };
 
@@ -183,7 +210,7 @@ export const loginUsuario = async (email: string, senha: string) => {
     });
     
     if (error) {
-      throw handleAuthError(error, 'Erro ao fazer login');
+      throw handleAuthError(error);
     }
     
     if (!data.user || !data.session) {
@@ -225,7 +252,7 @@ export const loginUsuario = async (email: string, senha: string) => {
     }
     
     // Caso contrário, trata como erro genérico
-    return handleAuthError(error, 'Erro ao fazer login');
+    return handleAuthError(error);
   }
 };
 
