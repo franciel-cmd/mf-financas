@@ -47,12 +47,21 @@ console.log('Conectando ao Supabase com: ', {
   keyDefinida: supabaseAnonKey ? 'Sim' : 'Não'
 });
 
-// Criar cliente Supabase
+// Criar cliente Supabase com configurações avançadas para melhorar a persistência
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
-    detectSessionInUrl: true
+    detectSessionInUrl: true,
+    storageKey: 'mf-financas-auth-token',
+  },
+  global: {
+    headers: {
+      'X-Client-Info': 'MF-Financas/1.0'
+    },
+  },
+  realtime: {
+    timeout: 30000
   }
 });
 
@@ -62,7 +71,7 @@ supabase.auth.onAuthStateChange((event, session) => {
 });
 
 // Função de teste para verificar conexão ao Supabase
-export const testarConexaoSupabase = async () => {
+export const testarConexaoSupabase = async (): Promise<boolean> => {
   try {
     const { data, error } = await supabase.from('usuarios').select('count()', { count: 'exact' }).limit(1);
     if (error) {

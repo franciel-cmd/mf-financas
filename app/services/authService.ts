@@ -2,397 +2,305 @@ import { supabase } from './supabase';
 import { toast } from 'react-toastify';
 import { CredenciaisLogin, Usuario } from '../types';
 import { credenciaisLoginSchema, registroUsuarioSchema, validar } from '../schemas';
-import { logger } from '../utils/logger';
+import * as logger from '../utils/logger';
 import { validateAndSanitize, commonSchemas, sanitizeString } from '../utils/validators';
 import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
 
-// Esquema de validação para as credenciais de registro
+// Esquema de validação para registro
 const registroSchema = z.object({
-  nome: commonSchemas.name,
-  email: commonSchemas.email,
-  senha: commonSchemas.password
+  nome: z.string().min(3, 'Nome deve ter pelo menos 3 caracteres'),
+  email: z.string().email('Email inválido'),
+  senha: z.string().min(6, 'Senha deve ter pelo menos 6 caracteres'),
+  confirmacaoSenha: z.string().min(6, 'Confirmação de senha deve ter pelo menos 6 caracteres')
+}).refine(data => data.senha === data.confirmacaoSenha, {
+  message: 'As senhas não coincidem',
+  path: ['confirmacaoSenha']
 });
 
-// Esquema de validação para as credenciais de login
+// Esquema de validação para login
 const loginSchema = z.object({
-  email: commonSchemas.email,
+  email: z.string().email('Email inválido'),
   senha: z.string().min(1, 'Senha é obrigatória')
 });
 
-// Tratamento de erros unificado
-const handleError = (error: any, mensagem: string): void => {
-  logger.error(mensagem, error);
-  
-  let mensagemErro = mensagem;
-  
-  // Se for um erro do Supabase, extraímos a mensagem
-  if (error?.message) {
-    mensagemErro = `${mensagem}: ${error.message}`;
-    // Mensagens amigáveis para erros comuns de autenticação
-    if (error.message.includes('Invalid login credentials')) {
-      mensagemErro = 'E-mail ou senha incorretos.';
-    } else if (error.message.includes('User already registered')) {
-      mensagemErro = 'Este e-mail já está registrado.';
-    } else if (error.message.includes('Email not confirmed')) {
-      mensagemErro = 'Por favor, confirme seu e-mail antes de fazer login.';
-    } else if (error.message.includes('Password should be at least')) {
-      mensagemErro = 'A senha deve ter pelo menos 6 caracteres.';
+// Função para verificar a conexão com Supabase Auth
+export const testarConexaoAuth = async (): Promise<boolean> => {
+  try {
+    logger.info('Testando conexão com Supabase Auth');
+    const { data, error } = await supabase.auth.getSession();
+    
+    if (error) {
+      logger.error('Falha na conexão com Supabase Auth', error);
+      return false;
     }
+    
+    logger.info('Conexão com Supabase Auth bem-sucedida');
+    console.log('Status da sessão:', data.session ? 'Ativa' : 'Inativa');
+    return true;
+  } catch (error) {
+    logger.error('Erro ao testar conexão com Supabase Auth', error);
+    console.error('Erro ao testar conexão com Supabase Auth:', error);
+    return false;
   }
-  
-  // Se for um erro de validação, mostramos os erros específicos
-  if (error?.erros && Array.isArray(error.erros)) {
-    error.erros.forEach((erro: string) => {
-      toast.error(erro);
-    });
-    return;
-  }
-  
-  toast.error(mensagemErro);
 };
 
-/**
- * Registra um novo usuário
- * @param nome Nome do usuário
- * @param email E-mail do usuário
- * @param senha Senha do usuário
- * @param confirmacaoSenha Confirmação da senha do usuário
- * @returns Dados do usuário e token, ou null em caso de erro
- */
+// Função para lidar com erros de autenticação
+const handleAuthError = (error: any, mensagem: string) => {
+  logger.error(mensagem, error);
+  console.error(mensagem, error);
+  
+  if (error.message?.includes('Email not confirmed')) {
+    toast.error('Email não confirmado. Verifique sua caixa de entrada.');
+    return new Error('Email não confirmado');
+  }
+  
+  if (error.message?.includes('Invalid login credentials')) {
+    toast.error('Credenciais inválidas. Verifique email e senha.');
+    return new Error('Credenciais inválidas');
+  }
+  
+  if (error.message?.includes('User already registered')) {
+    toast.error('Email já cadastrado. Tente fazer login.');
+    return new Error('Email já cadastrado');
+  }
+  
+  toast.error(mensagem);
+  return new Error(mensagem);
+};
+
+// Função para registrar um novo usuário
 export const registrarUsuario = async (
   nome: string,
   email: string,
   senha: string,
   confirmacaoSenha: string
-): Promise<{ usuario: Usuario | null; token: string | null }> => {
+) => {
+  logger.info('Iniciando registro de usuário', { email });
+  console.log('Iniciando registro de usuário:', email);
+  
   try {
-    console.log('Iniciando registro de usuário:', email);
+    // Validar dados de entrada
+    const validacao = registroSchema.safeParse({ nome, email, senha, confirmacaoSenha });
+    if (!validacao.success) {
+      const mensagensErro = validacao.error.errors.map(e => e.message).join(', ');
+      logger.error('Erro na validação de registro', { mensagensErro });
+      toast.error(mensagensErro);
+      throw new Error(mensagensErro);
+    }
     
-    // Validar dados de registro
+    // Verificar se as senhas coincidem (redundante, mas para segurança extra)
     if (senha !== confirmacaoSenha) {
-      throw new Error('As senhas não coincidem.');
+      const mensagem = 'As senhas não coincidem';
+      logger.error(mensagem);
+      toast.error(mensagem);
+      throw new Error(mensagem);
     }
     
-    const resultadoValidacao = validateAndSanitize(registroSchema, {
-      nome,
-      email,
-      senha
-    });
-
-    if (!resultadoValidacao.success) {
-      throw new Error(`Dados inválidos: ${resultadoValidacao.errors?.join(', ')}`);
-    }
-
-    const dadosValidados = resultadoValidacao.data!;
-
-    // Limitar taxa de tentativas de registro (proteção contra ataques de força bruta)
-    const storedAttempts = sessionStorage.getItem('register_attempts') || '0';
-    const attempts = parseInt(storedAttempts, 10);
+    console.log('Dados validados, prosseguindo com registro');
     
-    if (attempts >= 5) {
-      const lastAttempt = sessionStorage.getItem('last_register_attempt') || '0';
-      const lastAttemptTime = parseInt(lastAttempt, 10);
-      const now = Date.now();
-      
-      if (now - lastAttemptTime < 300000) { // 5 minutos
-        logger.warning('Muitas tentativas de registro detectadas', { email, attempts });
-        toast.error('Muitas tentativas de registro. Tente novamente em alguns minutos.');
-        return { usuario: null, token: null };
-      } else {
-        // Reinicia o contador após 5 minutos
-        sessionStorage.setItem('register_attempts', '0');
-      }
-    }
-    
-    sessionStorage.setItem('register_attempts', (attempts + 1).toString());
-    sessionStorage.setItem('last_register_attempt', Date.now().toString());
-
-    // Registro no Supabase Auth
+    // Registrar usuário no Supabase Auth
     const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: dadosValidados.email,
-      password: dadosValidados.senha,
+      email,
+      password: senha,
       options: {
         data: {
-          nome: dadosValidados.nome
+          nome
         }
       }
     });
-
+    
     if (authError) {
-      console.error('Erro ao registrar usuário no Auth:', authError);
-      
-      // Mensagens de erro mais amigáveis
-      if (authError.message.includes('already registered')) {
-        toast.error('Este e-mail já está registrado. Por favor, tente fazer login.');
-      } else {
-        toast.error(`Erro ao registrar: ${authError.message}`);
-      }
-      
-      return { usuario: null, token: null };
+      throw handleAuthError(authError, 'Erro ao registrar usuário');
     }
-
-    if (!authData.user) {
-      console.error('Usuário não retornado após registro');
-      toast.error('Erro ao criar conta. Por favor, tente novamente.');
-      return { usuario: null, token: null };
+    
+    if (!authData.user || !authData.session) {
+      const mensagem = 'Falha ao criar usuário (dados incompletos)';
+      logger.error(mensagem);
+      toast.error(mensagem);
+      throw new Error(mensagem);
     }
-
-    console.log('Usuário registrado no Auth com sucesso');
-
-    // Cria o perfil do usuário no banco de dados
-    const { data: userData, error: userError } = await supabase
+    
+    logger.info('Usuário registrado com sucesso', { userId: authData.user.id });
+    console.log('Usuário registrado com sucesso:', authData.user.id);
+    
+    // Criar perfil do usuário na tabela usuarios
+    const { error: profileError } = await supabase
       .from('usuarios')
       .insert({
         id: authData.user.id,
-        nome: dadosValidados.nome,
-        email: dadosValidados.email
-      })
-      .select()
-      .single();
-
-    if (userError) {
-      console.error('Erro ao criar perfil do usuário:', userError);
-      toast.error(`Erro ao criar perfil: ${userError.message}`);
-      
-      // Tentar excluir o usuário Auth já que o perfil falhou
-      try {
-        await supabase.auth.admin.deleteUser(authData.user.id);
-      } catch (e) {
-        console.error('Erro ao remover usuário Auth após falha no perfil:', e);
-      }
-      
-      return { usuario: null, token: null };
-    }
-
-    console.log('Perfil de usuário criado com sucesso');
+        nome,
+        email
+      });
     
-    const usuario: Usuario = {
-      id: authData.user.id,
-      nome: dadosValidados.nome,
-      email: dadosValidados.email,
-      senha: '' // Não armazenamos a senha
-    };
-
-    // Registrar ação de auditoria
-    logger.audit({
-      type: 'USER_REGISTERED',
-      userId: authData.user.id,
-      details: { email: dadosValidados.email }
-    });
-
-    toast.success('Cadastro realizado com sucesso!');
+    if (profileError) {
+      logger.error('Erro ao criar perfil do usuário', profileError);
+      console.error('Erro ao criar perfil do usuário:', profileError);
+      // Não impede o login, apenas loga o erro
+    }
+    
+    toast.success('Usuário cadastrado com sucesso!');
+    
+    // Retorna usuário e token
     return {
-      usuario,
-      token: authData.session?.access_token || null
+      usuario: {
+        id: authData.user.id,
+        nome,
+        email
+      },
+      token: authData.session.access_token
     };
-  } catch (error: any) {
-    const mensagem = error.message || 'Erro ao criar conta. Tente novamente.';
-    console.error('Exceção não tratada ao registrar usuário:', error);
-    toast.error(mensagem);
-    return { usuario: null, token: null };
+  } catch (error) {
+    // Se for um erro já tratado, apenas repassa
+    if (error instanceof Error) {
+      throw error;
+    }
+    
+    // Caso contrário, trata como erro genérico
+    return handleAuthError(error, 'Erro ao registrar usuário');
   }
 };
 
-/**
- * Autentica um usuário no sistema
- * @param credenciais Credenciais de login (email e senha)
- * @returns Dados do usuário e token, ou null em caso de erro
- */
-export const loginUsuario = async (
-  credenciais: CredenciaisLogin
-): Promise<{ usuario: Usuario | null; token: string | null }> => {
+// Função para fazer login
+export const loginUsuario = async (email: string, senha: string) => {
+  logger.info('Iniciando login de usuário', { email });
+  console.log('Iniciando login de usuário:', email);
+  
   try {
-    console.log('Iniciando login de usuário:', credenciais.email);
-    
-    // Validar e sanitizar os dados de entrada
-    const validationResult = validateAndSanitize(loginSchema, credenciais);
-    if (!validationResult.success) {
-      throw new Error(`Dados inválidos: ${validationResult.errors?.join(', ')}`);
+    // Validar dados de entrada
+    const validacao = loginSchema.safeParse({ email, senha });
+    if (!validacao.success) {
+      const mensagensErro = validacao.error.errors.map(e => e.message).join(', ');
+      logger.error('Erro na validação de login', { mensagensErro });
+      toast.error(mensagensErro);
+      throw new Error(mensagensErro);
     }
     
-    const dadosValidados = validationResult.data!;
-    
-    // Log de tentativa de login (dados sensíveis omitidos)
-    logger.audit('Tentativa de login', { email: dadosValidados.email });
-    
-    // Limitar taxa de tentativas de login (proteção contra ataques de força bruta)
-    const storedAttempts = sessionStorage.getItem('login_attempts') || '0';
-    const attempts = parseInt(storedAttempts, 10);
-    
-    if (attempts >= 5) {
-      const lastAttempt = sessionStorage.getItem('last_login_attempt') || '0';
-      const lastAttemptTime = parseInt(lastAttempt, 10);
-      const now = Date.now();
-      
-      if (now - lastAttemptTime < 300000) { // 5 minutos
-        logger.warning('Muitas tentativas de login detectadas', { email: dadosValidados.email, attempts });
-        toast.error('Muitas tentativas de login. Tente novamente em alguns minutos.');
-        return { usuario: null, token: null };
-      } else {
-        // Reinicia o contador após 5 minutos
-        sessionStorage.setItem('login_attempts', '0');
-      }
-    }
-    
-    sessionStorage.setItem('login_attempts', (attempts + 1).toString());
-    sessionStorage.setItem('last_login_attempt', Date.now().toString());
-    
-    // 1. Autenticar com o Supabase
-    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-      email: dadosValidados.email,
-      password: dadosValidados.senha
+    // Fazer login no Supabase Auth
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password: senha
     });
     
-    if (authError) {
-      console.error('Erro ao fazer login:', authError);
-      
-      // Mensagens de erro mais amigáveis
-      if (authError.message.includes('Invalid login credentials')) {
-        toast.error('E-mail ou senha incorretos.');
-      } else {
-        toast.error(`Erro ao fazer login: ${authError.message}`);
-      }
-      
-      return { usuario: null, token: null };
+    if (error) {
+      throw handleAuthError(error, 'Erro ao fazer login');
     }
     
-    if (!authData.user) {
-      console.error('Usuário não retornado após login');
-      toast.error('Erro ao fazer login. Por favor, tente novamente.');
-      return { usuario: null, token: null };
+    if (!data.user || !data.session) {
+      const mensagem = 'Falha no login (dados incompletos)';
+      logger.error(mensagem);
+      toast.error(mensagem);
+      throw new Error(mensagem);
     }
     
-    console.log('Autenticação bem-sucedida, buscando dados do usuário');
-
-    // 2. Buscar dados do usuário no banco
+    logger.info('Login realizado com sucesso', { userId: data.user.id });
+    console.log('Login realizado com sucesso:', data.user.id);
+    
+    // Buscar dados do usuário na tabela usuarios
     const { data: userData, error: userError } = await supabase
       .from('usuarios')
       .select('*')
-      .eq('id', authData.user.id)
+      .eq('id', data.user.id)
       .single();
     
     if (userError) {
-      console.error('Erro ao buscar dados do usuário:', userError);
-      toast.error('Erro ao recuperar informações do perfil.');
-      return { usuario: null, token: null };
+      logger.error('Erro ao buscar dados do usuário', userError);
+      console.warn('Erro ao buscar dados do usuário, usando dados do Auth:', userError);
     }
     
-    if (!userData) {
-      console.error('Dados do usuário não encontrados');
-      toast.error('Perfil não encontrado. Por favor, contate o suporte.');
-      return { usuario: null, token: null };
-    }
-    
-    console.log('Login completo com sucesso');
-    
-    // Aplicar sanitização adicional aos dados do usuário
-    const usuario: Usuario = {
-      id: userData.id,
-      nome: sanitizeString(userData.nome),
-      email: sanitizeString(userData.email),
-      senha: '' // Campo obrigatório, mas não armazenamos a senha real
-    };
-    
-    toast.success(`Bem-vindo(a) de volta, ${usuario.nome}!`);
+    const nome = userData?.nome || data.user.user_metadata?.nome || 'Usuário';
     
     return {
-      usuario,
-      token: authData.session.access_token
+      usuario: {
+        id: data.user.id,
+        nome,
+        email: data.user.email as string
+      },
+      token: data.session.access_token
     };
-  } catch (error: any) {
-    const mensagem = error.message || 'Erro ao fazer login. Tente novamente.';
-    console.error('Exceção não tratada ao fazer login:', error);
-    toast.error(mensagem);
-    return { usuario: null, token: null };
+  } catch (error) {
+    // Se for um erro já tratado, apenas repassa
+    if (error instanceof Error) {
+      throw error;
+    }
+    
+    // Caso contrário, trata como erro genérico
+    return handleAuthError(error, 'Erro ao fazer login');
   }
 };
 
-// Logout de usuário
-export const logoutUsuario = async (): Promise<boolean> => {
+// Função para fazer logout
+export const logoutUsuario = async () => {
+  logger.info('Iniciando logout de usuário');
+  console.log('Iniciando logout de usuário');
+  
   try {
-    console.log('Iniciando logout');
-    
     const { error } = await supabase.auth.signOut();
-
+    
     if (error) {
+      logger.error('Erro ao fazer logout', error);
       console.error('Erro ao fazer logout:', error);
-      toast.error(`Erro ao sair: ${error.message}`);
-      return false;
+      throw error;
     }
-
+    
+    logger.info('Logout realizado com sucesso');
     console.log('Logout realizado com sucesso');
-    toast.success('Você saiu com sucesso!');
+    
     return true;
   } catch (error) {
-    console.error('Exceção não tratada ao fazer logout:', error);
-    toast.error('Erro inesperado ao sair.');
-    return false;
+    logger.error('Erro ao fazer logout', error);
+    console.error('Erro ao fazer logout:', error);
+    toast.error('Erro ao fazer logout');
+    throw error;
   }
 };
 
-// Verifica se o usuário está autenticado
-export const verificarAutenticacao = async (): Promise<{
-  usuario: Usuario | null;
-  token: string | null;
-}> => {
+// Função para verificar se o usuário está autenticado
+export const verificarAutenticacao = async () => {
   try {
-    console.log('Verificando autenticação');
+    const { data: sessionData, error } = await supabase.auth.getSession();
     
-    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-
-    if (sessionError) {
-      console.error('Erro ao verificar sessão:', sessionError);
+    if (error) {
+      logger.error('Erro ao verificar autenticação', error);
+      console.error('Erro ao verificar autenticação:', error);
       return { usuario: null, token: null };
     }
-
+    
     if (!sessionData.session) {
-      console.log('Nenhuma sessão encontrada');
+      logger.info('Usuário não autenticado (sem sessão)');
+      console.log('Usuário não autenticado (sem sessão)');
       return { usuario: null, token: null };
     }
-
-    const { user } = sessionData.session;
     
-    if (!user) {
-      console.log('Sessão encontrada, mas sem usuário');
-      return { usuario: null, token: null };
-    }
-
-    console.log('Sessão ativa encontrada, buscando dados do usuário');
-
-    // 2. Buscar informações do usuário
-    const { data: usuarioData, error: usuarioError } = await supabase
+    // Buscar dados do usuário na tabela usuarios
+    const { data: userData, error: userError } = await supabase
       .from('usuarios')
       .select('*')
-      .eq('id', user.id)
+      .eq('id', sessionData.session.user.id)
       .single();
-
-    if (usuarioError) {
-      console.error('Erro ao buscar dados do usuário após verificar autenticação:', usuarioError);
-      return { usuario: null, token: null };
-    }
-
-    if (!usuarioData) {
-      console.error('Dados do usuário não encontrados após verificar autenticação');
-      return { usuario: null, token: null };
-    }
-
-    console.log('Verificação de autenticação completa com sucesso');
     
-    // Preparar objeto de usuário (sem senha)
-    const usuario: Usuario = {
-      id: usuarioData.id,
-      nome: usuarioData.nome,
-      email: usuarioData.email,
-      fotoPerfil: usuarioData.foto_perfil,
-    };
-
-    return { 
-      usuario, 
-      token: sessionData.session.access_token || null 
+    if (userError) {
+      logger.warning('Erro ao buscar dados de perfil, usando dados do Auth', userError);
+      console.warn('Erro ao buscar dados de perfil, usando dados do Auth:', userError);
+    }
+    
+    const user = sessionData.session.user;
+    const nome = userData?.nome || user.user_metadata?.nome || 'Usuário';
+    
+    logger.info('Usuário autenticado', { userId: user.id });
+    console.log('Usuário autenticado:', user.id, nome);
+    
+    return {
+      usuario: {
+        id: user.id,
+        nome,
+        email: user.email as string
+      },
+      token: sessionData.session.access_token || null
     };
   } catch (error) {
-    console.error('Exceção não tratada ao verificar autenticação:', error);
+    logger.error('Erro ao verificar autenticação', error);
+    console.error('Erro ao verificar autenticação:', error);
     return { usuario: null, token: null };
   }
 }; 

@@ -255,7 +255,7 @@ export default function Login() {
       if (isLogin) {
         success = await login({ email, senha });
       } else {
-        success = await cadastrar(nome, email, senha);
+        success = await cadastrar(nome, email, senha, confirmaSenha);
       }
       
       if (success) {
