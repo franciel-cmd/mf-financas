@@ -9,12 +9,14 @@ import {
   testarConexaoAuth
 } from '../services/authService';
 import { testarConexaoSupabase } from '../services/supabase';
+import { debug, error as errorLog } from '../utils/logger';
 
 // Interface para estado de autenticação
 interface AuthState {
   usuario: Usuario | null;
   token: string | null;
   carregando: boolean;
+  erro: string | null;
 }
 
 // Resultado esperado das funções de autenticação
@@ -27,9 +29,11 @@ interface AuthContextData {
   usuario: Usuario | null;
   token: string | null;
   carregando: boolean;
+  erro: string | null;
   login: (email: string, senha: string) => Promise<boolean>;
   logout: () => Promise<void>;
   cadastrar: (nome: string, email: string, senha: string, confirmacaoSenha: string) => Promise<boolean>;
+  limparErro: () => void;
 }
 
 export const AuthContext = createContext<AuthContextData>({} as AuthContextData);
@@ -38,10 +42,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [authData, setAuthData] = useState<AuthState>({
     usuario: null,
     token: null,
-    carregando: true
+    carregando: true,
+    erro: null
   });
 
   console.log('AuthProvider montado - Verificando autenticação existente');
+
+  // Função para limpar mensagens de erro
+  const limparErro = useCallback(() => {
+    setAuthData(prev => ({ ...prev, erro: null }));
+  }, []);
 
   // Verificar conexão com Supabase Auth no carregamento
   useEffect(() => {
@@ -50,12 +60,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         const conectado = await testarConexaoSupabase();
         if (!conectado) {
-          toast.error('Erro de conexão com o servidor. Verifique sua internet.');
+          setAuthData(prev => ({
+            ...prev,
+            erro: 'Erro de conexão com o servidor. Verifique sua internet.'
+          }));
+          errorLog('Falha na conexão com Supabase');
+        } else {
+          debug('Conexão com Supabase bem-sucedida');
+          // Limpar erro se a conexão for bem-sucedida
+          setAuthData(prev => ({
+            ...prev,
+            erro: null
+          }));
         }
         await testarConexaoAuth();
       } catch (error) {
         console.error('Erro ao testar conexão:', error);
-        toast.error('Falha ao conectar com o servidor de autenticação');
+        errorLog('Falha na conexão com o servidor de autenticação', error);
+        setAuthData(prev => ({
+          ...prev,
+          erro: 'Falha ao conectar com o servidor de autenticação'
+        }));
       }
     };
 
@@ -67,7 +92,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     console.log('Verificando autenticação...');
     try {
       // Define carregando como true durante a verificação
-      setAuthData(prev => ({ ...prev, carregando: true }));
+      setAuthData(prev => ({ ...prev, carregando: true, erro: null }));
       
       const resposta = await verificarAutenticacao();
       console.log('Resposta de verificação de autenticação:', resposta ? 'Autenticado' : 'Não autenticado');
@@ -76,7 +101,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setAuthData({
           usuario: resposta.usuario,
           token: resposta.token,
-          carregando: false
+          carregando: false,
+          erro: null
         });
         console.log('Usuário autenticado:', resposta.usuario.email);
         return true;
@@ -85,7 +111,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setAuthData({
           usuario: null,
           token: null,
-          carregando: false
+          carregando: false,
+          erro: null
         });
         console.log('Usuário não autenticado');
         return false;
@@ -93,10 +120,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (error) {
       console.error('Erro ao verificar autenticação:', error);
       // Em caso de erro, assume que não está autenticado
+      const mensagemErro = error instanceof Error ? error.message : 'Erro ao verificar autenticação';
       setAuthData({
         usuario: null,
         token: null,
-        carregando: false
+        carregando: false,
+        erro: mensagemErro
       });
       return false;
     }
@@ -120,7 +149,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Função de login
   const login = useCallback(async (email: string, senha: string): Promise<boolean> => {
     try {
+      // Remover qualquer erro anterior
+      setAuthData(prev => ({ ...prev, carregando: true, erro: null }));
+      
       console.log('Iniciando processo de login para:', email);
+      
+      // Verificar conexão com o servidor antes de tentar login
+      const conexaoOk = await testarConexaoSupabase();
+      if (!conexaoOk) {
+        setAuthData(prev => ({
+          ...prev,
+          carregando: false,
+          erro: 'Não foi possível conectar ao servidor. Verifique sua internet e tente novamente.'
+        }));
+        return false;
+      }
+      
       const resposta = await loginUsuario(email, senha);
       
       // Verificar se resposta é um objeto e tem as propriedades necessárias
@@ -129,19 +173,54 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setAuthData({
           usuario: resposta.usuario,
           token: resposta.token,
-          carregando: false
+          carregando: false,
+          erro: null
         });
         toast.success('Login realizado com sucesso!');
         return true;
+      } else if (resposta && typeof resposta === 'object' && 'error' in resposta) {
+        const erro = resposta.error instanceof Error ? resposta.error.message : 'Erro desconhecido';
+        console.error('Login falhou com erro específico:', erro);
+        setAuthData(prev => ({
+          ...prev,
+          carregando: false,
+          erro
+        }));
+        
+        // Toast já deve ter sido mostrado pelo serviço
+        return false;
       } else {
         console.error('Login falhou - dados de resposta inválidos');
+        setAuthData(prev => ({
+          ...prev,
+          carregando: false,
+          erro: 'Erro ao fazer login. Verifique suas credenciais.'
+        }));
         toast.error('Erro ao fazer login. Verifique suas credenciais.');
         return false;
       }
     } catch (error) {
       console.error('Erro durante login:', error);
       const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
-      toast.error(`Falha no login: ${errorMessage}`);
+      setAuthData(prev => ({
+        ...prev,
+        carregando: false,
+        erro: errorMessage
+      }));
+      
+      // Verificar se o erro parece ser de conexão
+      const mensagemErro = errorMessage.toLowerCase();
+      if (
+        mensagemErro.includes('failed to fetch') || 
+        mensagemErro.includes('network') || 
+        mensagemErro.includes('conexão') || 
+        mensagemErro.includes('timeout')
+      ) {
+        toast.error('Falha na conexão com o servidor. Verifique sua internet e tente novamente.');
+      } else {
+        toast.error(`Falha no login: ${errorMessage}`);
+      }
+      
       return false;
     }
   }, []);
@@ -156,13 +235,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setAuthData({
         usuario: null,
         token: null,
-        carregando: false
+        carregando: false,
+        erro: null
       });
       
       console.log('Logout realizado com sucesso');
       toast.info('Você saiu do sistema');
     } catch (error) {
       console.error('Erro durante logout:', error);
+      const mensagemErro = error instanceof Error ? error.message : 'Erro desconhecido';
+      setAuthData(prev => ({
+        ...prev,
+        carregando: false,
+        erro: mensagemErro
+      }));
       toast.error('Erro ao fazer logout');
     }
   }, []);
@@ -175,10 +261,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     confirmacaoSenha: string
   ): Promise<boolean> => {
     try {
+      // Remover qualquer erro anterior e indicar carregamento
+      setAuthData(prev => ({ ...prev, carregando: true, erro: null }));
+      
       console.log('Iniciando processo de cadastro para:', email);
+      
+      // Verificar conexão com o servidor antes de tentar cadastro
+      const conexaoOk = await testarConexaoSupabase();
+      if (!conexaoOk) {
+        setAuthData(prev => ({
+          ...prev,
+          carregando: false,
+          erro: 'Não foi possível conectar ao servidor. Verifique sua internet e tente novamente.'
+        }));
+        toast.error('Erro de conexão com o servidor');
+        return false;
+      }
       
       if (senha !== confirmacaoSenha) {
         console.error('Cadastro falhou - senhas não coincidem');
+        setAuthData(prev => ({
+          ...prev,
+          carregando: false,
+          erro: 'As senhas não coincidem'
+        }));
         toast.error('As senhas não coincidem');
         return false;
       }
@@ -191,18 +297,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setAuthData({
           usuario: resposta.usuario,
           token: resposta.token,
-          carregando: false
+          carregando: false,
+          erro: null
         });
         toast.success('Cadastro realizado com sucesso!');
         return true;
+      } else if (resposta && typeof resposta === 'object' && 'error' in resposta) {
+        const erro = resposta.error instanceof Error ? resposta.error.message : 'Erro desconhecido';
+        console.error('Cadastro falhou com erro específico:', erro);
+        setAuthData(prev => ({
+          ...prev,
+          carregando: false,
+          erro: erro
+        }));
+        // Toast já deve ter sido mostrado pelo serviço
+        return false;
       } else {
         console.error('Cadastro falhou - dados de resposta inválidos');
+        setAuthData(prev => ({
+          ...prev,
+          carregando: false,
+          erro: 'Erro ao realizar cadastro'
+        }));
         toast.error('Erro ao realizar cadastro');
         return false;
       }
     } catch (error) {
       console.error('Erro durante cadastro:', error);
       const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+      setAuthData(prev => ({
+        ...prev,
+        carregando: false,
+        erro: errorMessage
+      }));
       toast.error(`Falha no cadastro: ${errorMessage}`);
       return false;
     }
@@ -213,8 +340,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     console.log('AuthContext estado atualizado:', {
       usuarioPresente: authData.usuario ? 'Sim' : 'Não',
       tokenPresente: authData.token ? 'Sim' : 'Não',
-      carregando: authData.carregando
+      carregando: authData.carregando,
+      temErro: authData.erro ? 'Sim' : 'Não'
     });
+    
+    // Se houver erro, logar para depuração
+    if (authData.erro) {
+      errorLog('Erro no contexto de autenticação', { mensagem: authData.erro });
+    }
   }, [authData]);
 
   return (
@@ -223,9 +356,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         usuario: authData.usuario,
         token: authData.token,
         carregando: authData.carregando,
+        erro: authData.erro,
         login,
         logout,
-        cadastrar
+        cadastrar,
+        limparErro
       }}
     >
       {children}

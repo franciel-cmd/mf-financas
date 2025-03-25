@@ -6,6 +6,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'solid' | 'outline';
   size?: 'sm' | 'md' | 'lg';
   fullWidth?: boolean;
+  loading?: boolean;
 }
 
 const getColorScheme = (color: string) => {
@@ -93,6 +94,7 @@ const StyledButton = styled.button<ButtonProps>`
   cursor: pointer;
   transition: all 0.15s ease-in-out;
   width: ${props => props.fullWidth ? '100%' : 'auto'};
+  position: relative;
 
   /* Size styles */
   ${props => {
@@ -139,6 +141,24 @@ const StyledButton = styled.button<ButtonProps>`
     opacity: 0.6;
     cursor: not-allowed;
   }
+  
+  /* Loading spinner styles */
+  .spinner {
+    display: inline-block;
+    width: 1em;
+    height: 1em;
+    border: 2px solid transparent;
+    border-top-color: currentColor;
+    border-radius: 50%;
+    animation: spin 0.75s linear infinite;
+    margin-right: ${props => props.children ? '0.5rem' : '0'};
+  }
+  
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
 `;
 
 export const Button: React.FC<ButtonProps> = ({
@@ -147,6 +167,8 @@ export const Button: React.FC<ButtonProps> = ({
   variant = 'solid',
   size = 'md',
   fullWidth = false,
+  loading = false,
+  disabled = false,
   ...props
 }) => {
   return (
@@ -155,8 +177,10 @@ export const Button: React.FC<ButtonProps> = ({
       variant={variant}
       size={size}
       fullWidth={fullWidth}
+      disabled={disabled || loading}
       {...props}
     >
+      {loading && <span className="spinner" />}
       {children}
     </StyledButton>
   );
