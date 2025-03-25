@@ -1,6 +1,6 @@
 import React from 'react';
 import { Navigate, Outlet } from 'react-router-dom';
-import { useAuth } from '../hooks/useAuth';
+import useAuth from '../hooks/useAuth';
 import styled from 'styled-components';
 import { FiLoader } from 'react-icons/fi';
 
@@ -35,9 +35,10 @@ const LoadingText = styled.p`
 `;
 
 export default function PrivateRoute() {
-  const { isAuthenticated, loading } = useAuth();
+  const { usuario, carregando } = useAuth();
+  const isAuthenticated = !!usuario;
 
-  if (loading) {
+  if (carregando) {
     return (
       <LoadingContainer>
         <FiLoader size={32} />

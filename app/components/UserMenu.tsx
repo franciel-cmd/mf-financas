@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import styled from 'styled-components';
 import { FiUser, FiLogOut, FiSettings } from 'react-icons/fi';
-import { useAuth } from '../hooks/useAuth';
+import useAuth from '../hooks/useAuth';
 
 const UserMenuContainer = styled.div`
   position: relative;

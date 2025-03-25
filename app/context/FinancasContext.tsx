@@ -5,7 +5,7 @@ import { toast } from 'react-toastify';
 import { Conta, Filtro, StatusConta, CategoriaConta, Relatorio } from '../types';
 import { jsPDF } from 'jspdf';
 import ExcelJS from 'exceljs';
-import { useAuth } from '../hooks/useAuth';
+import useAuth from '../hooks/useAuth';
 import { logger } from '../utils/logger';
 import { 
   buscarContas as buscarContasService,
