@@ -2,7 +2,7 @@ import React, { useState, FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
 import { FiMail, FiLock, FiLogIn, FiUser } from 'react-icons/fi';
-import { useAuth } from '../hooks/useAuth';
+import useAuth from '../hooks/useAuth';
 
 const LoginContainer = styled.div`
   display: flex;
