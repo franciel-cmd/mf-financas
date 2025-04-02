@@ -11,35 +11,51 @@ const isDevelopment = process.env.NODE_ENV === 'development';
 const BACKUP_URL = 'https://jtsbmolnhlrpyxccwpul.supabase.co';
 const BACKUP_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp0c2Jtb2xuaGxycHl4Y2N3cHVsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MDAwNTM2NzQsImV4cCI6MjAxNTYyOTY3NH0.NmThbvLbEmhJQmb0Jz98YQkpPNFbxDneMgQQ1l9ueoc';
 
-// Obter URL e chave do Supabase de variáveis de ambiente - PRODUÇÃO
-let supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-let supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// Flag global para indicar se estamos usando modo offline
+let isOfflineMode = false;
 
-// Sistema de fallback para casos onde as variáveis não foram definidas corretamente
-if (!supabaseUrl || !supabaseAnonKey) {
-  errorLog('⚠️ Variáveis de ambiente do Supabase não definidas corretamente');
-  console.error('⚠️ Variáveis de ambiente do Supabase não definidas corretamente');
-  console.log('URL:', supabaseUrl ? 'Definida' : 'Não definida');
-  console.log('Chave:', supabaseAnonKey ? 'Definida' : 'Não definida');
-  
-  // Usar valores de backup para evitar quebra total da aplicação
-  console.warn('Usando valores de backup para conexão com Supabase');
-  
-  // Atualizar com os valores de backup
-  supabaseUrl = BACKUP_URL;
-  supabaseAnonKey = BACKUP_KEY;
+// Obter URL e chave do Supabase de variáveis de ambiente - PRODUÇÃO
+let supabaseUrl = import.meta.env.VITE_SUPABASE_URL || BACKUP_URL;
+let supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || BACKUP_KEY;
+
+// Log de inicialização
+console.log('Inicializando cliente Supabase...');
+console.log('URL:', supabaseUrl ? 'Definida' : 'Não definida');
+console.log('Chave:', supabaseAnonKey ? 'Definida' : 'Não definida');
+
+// Verificar se há CORS habilitado (com tratamento de erro melhorado)
+try {
+  console.log('Verificando CORS e conexão...');
+  fetch(`${supabaseUrl}/rest/v1/health?select=*`, {
+    method: 'OPTIONS',
+    headers: {
+      'apikey': supabaseAnonKey,
+      'Content-Type': 'application/json'
+    },
+    // Adicionar um timeout curto para não bloquear a inicialização
+    signal: AbortSignal.timeout(5000)
+  }).then(response => {
+    const corsHeaders = response.headers.get('access-control-allow-origin');
+    console.log('CORS Headers:', corsHeaders ? 'Configurados' : 'Não detectados');
+  }).catch(err => {
+    console.warn('Aviso na verificação de CORS:', err.message);
+    // Não tratamos como erro crítico
+  });
+} catch (error) {
+  console.warn('Falha ao testar CORS:', error);
+  // Não tratamos como erro crítico
 }
 
 // Configurações para ajustar a tolerância a falhas
-const FETCH_TIMEOUT = 30000; // 30 segundos
-const MAX_RETRIES = 2;
-const RETRY_INTERVAL = 1000;
-const RECONNECT_INTERVAL = 3000; // 3 segundos entre tentativas de reconexão
+const FETCH_TIMEOUT = 60000; // 60 segundos
+const MAX_RETRIES = 3; // 3 tentativas
+const RETRY_INTERVAL = 2000; // 2 segundos
+const RECONNECT_INTERVAL = 5000; // 5 segundos entre tentativas de reconexão
 
 // Estado de conexão
 let isReconnecting = false;
 let reconnectAttempts = 0;
-const MAX_RECONNECT_ATTEMPTS = 3;
+const MAX_RECONNECT_ATTEMPTS = 5; // 5 tentativas
 
 // Detecção de ambiente de produção vs. desenvolvimento
 const isProduction = import.meta.env.MODE === 'production';
@@ -50,27 +66,14 @@ const actualHost = baseURL.hostname;
 console.log(`Modo: ${isProduction ? 'Produção' : 'Desenvolvimento'}`);
 console.log(`Host Supabase: ${actualHost}`);
 
-// Verificar se há CORS habilitado
-try {
-  fetch(`${supabaseUrl}/rest/v1/health?select=*`, {
-    method: 'OPTIONS',
-    headers: {
-      'apikey': supabaseAnonKey,
-      'Content-Type': 'application/json'
-    }
-  }).then(response => {
-    const corsHeaders = response.headers.get('access-control-allow-origin');
-    console.log('CORS Headers:', corsHeaders ? 'Configurados' : 'Não detectados');
-  }).catch(err => {
-    console.error('Erro na verificação de CORS:', err.message);
-  });
-} catch (error) {
-  console.error('Falha ao testar CORS:', error);
-}
-
 // Configuração de fetch com timeout personalizado e retry automático
 const fetchWithRetry = async (input: RequestInfo | URL, init?: RequestInit, retryCount = 0): Promise<Response> => {
   try {
+    // Verificar se estamos em modo offline primeiro
+    if (isOfflineMode) {
+      throw new Error('Aplicação em modo offline devido a problemas de conexão');
+    }
+    
     // Criar um controlador de aborto
     const controller = new AbortController();
     const { signal } = controller;
@@ -131,12 +134,15 @@ const fetchWithRetry = async (input: RequestInfo | URL, init?: RequestInit, retr
           await new Promise(resolve => setTimeout(resolve, nextRetryDelay));
           return fetchWithRetry(input, init, retryCount + 1);
         } else {
-          throw new Error('Tempo de conexão esgotado ao comunicar com o servidor. Por favor, verifique sua conexão com a internet ou tente novamente mais tarde.');
+          // Se falhar várias vezes, ativar modo offline
+          isOfflineMode = true;
+          throw new Error('Tempo de conexão esgotado ao comunicar com o servidor. O aplicativo funcionará em modo offline com recursos limitados.');
         }
       } else if (error.name === 'TypeError' && (
         error.message.includes('Failed to fetch') || 
         error.message.includes('Network request failed') ||
-        error.message.includes('Network Error')
+        error.message.includes('Network Error') ||
+        error.message.includes('ERR_NAME_NOT_RESOLVED')
       )) {
         console.error('Erro de rede detectado:', error.message);
         errorLog('Erro de rede na requisição', {
@@ -152,9 +158,10 @@ const fetchWithRetry = async (input: RequestInfo | URL, init?: RequestInit, retr
           await new Promise(resolve => setTimeout(resolve, nextRetryDelay));
           return fetchWithRetry(input, init, retryCount + 1);
         } else {
-          // Iniciar reconexão automática após máximo de retries
+          // Se falhar várias vezes, ativar modo offline e iniciar reconexão automática
+          isOfflineMode = true;
           scheduleReconnect();
-          throw new Error('Falha na conexão com o servidor. Verifique sua conexão com a internet ou tente novamente mais tarde.');
+          throw new Error('Falha na conexão com o servidor. O aplicativo funcionará em modo offline com recursos limitados.');
         }
       }
     }
@@ -197,6 +204,67 @@ export let supabase = createSupabaseClient();
 // Log de inicialização
 console.log('Cliente Supabase inicializado');
 
+// Função para testar conexão com Supabase
+export const testarConexaoSupabase = async (): Promise<boolean> => {
+  // Se já sabemos que estamos offline, nem tentamos
+  if (isOfflineMode && reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+    console.log('Modo offline ativo. Usando dados locais.');
+    return false;
+  }
+
+  try {
+    console.log('Testando conexão com Supabase...');
+    
+    // Usar AbortController com timeout curto para não bloquear a UI
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    
+    try {
+      const response = await fetch(`${supabaseUrl}/rest/v1/health?select=*`, {
+        method: 'GET',
+        headers: {
+          'apikey': supabaseAnonKey,
+          'Content-Type': 'application/json'
+        },
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeout);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
+      console.log('✅ Conexão com Supabase bem-sucedida!');
+      
+      // Conectou com sucesso, desativar modo offline
+      if (isOfflineMode) {
+        isOfflineMode = false;
+        console.log('Modo offline desativado. Dados online disponíveis novamente.');
+      }
+      
+      return true;
+    } catch (err) {
+      // Limpar o timeout se houver erro
+      clearTimeout(timeout);
+      
+      // Repassar o erro para ser tratado
+      throw err;
+    }
+  } catch (error) {
+    if (error instanceof Error) {
+      if (error.name === 'AbortError') {
+        console.error('Timeout ao testar conexão com Supabase');
+        errorLog('Timeout na verificação de conexão com Supabase');
+      } else {
+        console.error('Erro ao testar conexão com Supabase:', error.message);
+        errorLog('Falha na verificação de conexão com Supabase', error);
+      }
+    }
+    return false;
+  }
+};
+
 // Agendar reconexão
 const scheduleReconnect = () => {
   if (isReconnecting) return;
@@ -209,8 +277,9 @@ const scheduleReconnect = () => {
       console.error('Falha ao reconectar após várias tentativas. Verifique o status do serviço Supabase.');
       errorLog('Falha na reconexão após máximo de tentativas');
       
-      // Notificar o usuário sobre o problema persistente
-      toast.error('Problemas de conexão com o servidor persistem. Tente novamente mais tarde ou verifique sua conexão com a internet.');
+      // Manter o modo offline ativo
+      isOfflineMode = true;
+      console.log('Aplicativo permanecerá em modo offline. Recarregue a página para tentar novamente.');
       
       isReconnecting = false;
       return;
@@ -230,8 +299,9 @@ const scheduleReconnect = () => {
         console.log('✅ Reconexão com Supabase bem-sucedida!');
         debug('Reconexão com Supabase estabelecida após tentativas');
         
-        // Notificar o usuário sobre a reconexão
-        toast.success('Conexão com o servidor restabelecida com sucesso');
+        // Desativar modo offline
+        isOfflineMode = false;
+        console.log('Modo offline desativado. Dados online disponíveis novamente.');
         
         isReconnecting = false;
       } else {
@@ -251,76 +321,8 @@ const scheduleReconnect = () => {
     }
   };
   
-  // Iniciar primeira tentativa de reconexão após um pequeno intervalo
-  setTimeout(attemptReconnect, RECONNECT_INTERVAL);
-};
-
-// Função para testar a conexão com o Supabase
-export const testarConexaoSupabase = async (): Promise<boolean> => {
-  debug('Testando conexão com Supabase...');
-  
-  try {
-    // Adicionar timeout de 10 segundos para o teste
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
-    
-    // Teste básico de conexão usando sistema de health check
-    const response = await fetch(`${supabaseUrl}/rest/v1/health?select=*`, {
-      method: 'GET',
-      headers: {
-        'apikey': supabaseAnonKey,
-        'Content-Type': 'application/json'
-      },
-      signal: controller.signal
-    }).catch(error => {
-      clearTimeout(timeoutId);
-      console.error('Erro na requisição de health check:', error.message);
-      throw error;
-    });
-    
-    clearTimeout(timeoutId);
-    
-    if (response.status === 404) {
-      // Se a tabela health não existir, tente uma alternativa
-      debug('Tabela health não encontrada, verificando sessão auth');
-      
-      try {
-        const authResponse = await supabase.auth.getSession();
-        debug('Teste de sessão auth concluído');
-        
-        // Se chegou aqui, significa que conseguiu se comunicar com o Supabase
-        console.log('Conexão com Supabase estabelecida via auth.getSession()');
-        return true;
-      } catch (authError) {
-        console.error('Falha no teste via auth.getSession():', authError);
-        return false;
-      }
-    }
-    
-    if (response.ok) {
-      debug('Conexão com Supabase estabelecida com sucesso via health check');
-      console.log('Conexão com Supabase estabelecida com sucesso via health check');
-      return true;
-    } else {
-      debug(`Erro no teste de conexão: ${response.status} ${response.statusText}`);
-      console.error('Erro no teste de conexão:', response.status, response.statusText);
-      return false;
-    }
-  } catch (err) {
-    if (err instanceof Error) {
-      if (err.name === 'AbortError') {
-        errorLog('Timeout ao testar conexão com Supabase');
-        console.error('Timeout ao testar conexão com Supabase');
-      } else {
-        errorLog('Erro ao testar conexão com Supabase', err);
-        console.error('Erro ao testar conexão com Supabase:', err.message);
-      }
-    } else {
-      errorLog('Erro desconhecido ao testar conexão com Supabase', err);
-      console.error('Erro desconhecido ao testar conexão com Supabase');
-    }
-    return false;
-  }
+  // Iniciar tentativa de reconexão
+  attemptReconnect();
 };
 
 // Verificar se o Supabase está correto

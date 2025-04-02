@@ -17,6 +17,7 @@ interface AuthState {
   token: string | null;
   carregando: boolean;
   erro: string | null;
+  modoOffline: boolean;
 }
 
 // Resultado esperado das funções de autenticação
@@ -30,6 +31,7 @@ interface AuthContextData {
   token: string | null;
   carregando: boolean;
   erro: string | null;
+  modoOffline: boolean;
   login: (email: string, senha: string) => Promise<boolean>;
   logout: () => Promise<void>;
   cadastrar: (nome: string, email: string, senha: string, confirmacaoSenha: string) => Promise<boolean>;
@@ -43,7 +45,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     usuario: null,
     token: null,
     carregando: true,
-    erro: null
+    erro: null,
+    modoOffline: false
   });
 
   console.log('AuthProvider montado - Verificando autenticação existente');
@@ -60,27 +63,82 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         const conectado = await testarConexaoSupabase();
         if (!conectado) {
-          setAuthData(prev => ({
-            ...prev,
-            erro: 'Erro de conexão com o servidor. Verifique sua internet.'
-          }));
+          // Tentar recuperar dados do localStorage em caso de falha
+          const dadosSalvos = localStorage.getItem('@MFFinancas:auth');
+          if (dadosSalvos) {
+            try {
+              const { usuario, token } = JSON.parse(dadosSalvos);
+              setAuthData(prev => ({
+                ...prev,
+                usuario,
+                token,
+                carregando: false,
+                erro: 'Usando dados salvos localmente. Algumas funcionalidades podem estar limitadas.',
+                modoOffline: true
+              }));
+              console.log('Usando dados de autenticação salvos localmente devido a problemas de conexão.');
+            } catch (e) {
+              localStorage.removeItem('@MFFinancas:auth');
+              setAuthData(prev => ({
+                ...prev,
+                erro: 'Erro de conexão com o servidor. Verifique sua internet.',
+                carregando: false,
+                modoOffline: true
+              }));
+            }
+          } else {
+            setAuthData(prev => ({
+              ...prev,
+              erro: 'Erro de conexão com o servidor. Verifique sua internet.',
+              carregando: false,
+              modoOffline: true
+            }));
+          }
           errorLog('Falha na conexão com Supabase');
         } else {
           debug('Conexão com Supabase bem-sucedida');
           // Limpar erro se a conexão for bem-sucedida
           setAuthData(prev => ({
             ...prev,
-            erro: null
+            erro: null,
+            modoOffline: false
           }));
         }
         await testarConexaoAuth();
       } catch (error) {
         console.error('Erro ao testar conexão:', error);
         errorLog('Falha na conexão com o servidor de autenticação', error);
-        setAuthData(prev => ({
-          ...prev,
-          erro: 'Falha ao conectar com o servidor de autenticação'
-        }));
+        
+        // Tentar recuperar dados do localStorage
+        const dadosSalvos = localStorage.getItem('@MFFinancas:auth');
+        if (dadosSalvos) {
+          try {
+            const { usuario, token } = JSON.parse(dadosSalvos);
+            setAuthData(prev => ({
+              ...prev,
+              usuario,
+              token,
+              carregando: false,
+              erro: 'Usando dados salvos localmente. Algumas funcionalidades podem estar limitadas.',
+              modoOffline: true
+            }));
+          } catch (e) {
+            localStorage.removeItem('@MFFinancas:auth');
+            setAuthData(prev => ({
+              ...prev,
+              erro: 'Falha ao conectar com o servidor de autenticação',
+              carregando: false,
+              modoOffline: true
+            }));
+          }
+        } else {
+          setAuthData(prev => ({
+            ...prev,
+            erro: 'Falha ao conectar com o servidor de autenticação',
+            carregando: false,
+            modoOffline: true
+          }));
+        }
       }
     };
 
@@ -97,6 +155,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Verificar conexão com o servidor antes de verificar autenticação
       const conexaoOk = await testarConexaoSupabase();
       if (!conexaoOk) {
+        // Se não conseguir conectar, tentar recuperar dados do localStorage
+        const dadosSalvos = localStorage.getItem('@MFFinancas:auth');
+        if (dadosSalvos) {
+          try {
+            const { usuario, token } = JSON.parse(dadosSalvos);
+            setAuthData({
+              usuario,
+              token,
+              carregando: false,
+              erro: 'Usando dados salvos localmente. Algumas funcionalidades podem estar limitadas.',
+              modoOffline: true
+            });
+            return true;
+          } catch (e) {
+            localStorage.removeItem('@MFFinancas:auth');
+          }
+        }
         throw new Error('Não foi possível conectar ao servidor. Verifique sua internet.');
       }
       
@@ -114,7 +189,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           usuario: resposta.usuario,
           token: resposta.token,
           carregando: false,
-          erro: null
+          erro: null,
+          modoOffline: false
         });
         console.log('Usuário autenticado:', resposta.usuario.email);
         return true;
@@ -126,7 +202,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           usuario: null,
           token: null,
           carregando: false,
-          erro: null
+          erro: null,
+          modoOffline: false
         });
         console.log('Usuário não autenticado');
         return false;
@@ -145,7 +222,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               usuario,
               token,
               carregando: false,
-              erro: 'Usando dados salvos localmente. Algumas funcionalidades podem estar limitadas.'
+              erro: 'Usando dados salvos localmente. Algumas funcionalidades podem estar limitadas.',
+              modoOffline: true
             });
             return true;
           } catch (e) {
@@ -158,7 +236,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         usuario: null,
         token: null,
         carregando: false,
-        erro: mensagemErro
+        erro: mensagemErro,
+        modoOffline: false
       });
       return false;
     }
@@ -193,7 +272,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setAuthData(prev => ({
           ...prev,
           carregando: false,
-          erro: 'Não foi possível conectar ao servidor. Verifique sua internet e tente novamente.'
+          erro: 'Não foi possível conectar ao servidor. Verifique sua internet e tente novamente.',
+          modoOffline: true
         }));
         return false;
       }
@@ -207,7 +287,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           usuario: resposta.usuario,
           token: resposta.token,
           carregando: false,
-          erro: null
+          erro: null,
+          modoOffline: false
         });
         toast.success('Login realizado com sucesso!');
         return true;
@@ -217,7 +298,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setAuthData(prev => ({
           ...prev,
           carregando: false,
-          erro
+          erro,
+          modoOffline: false
         }));
         
         // Toast já deve ter sido mostrado pelo serviço
@@ -227,7 +309,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setAuthData(prev => ({
           ...prev,
           carregando: false,
-          erro: 'Erro ao fazer login. Verifique suas credenciais.'
+          erro: 'Erro ao fazer login. Verifique suas credenciais.',
+          modoOffline: false
         }));
         toast.error('Erro ao fazer login. Verifique suas credenciais.');
         return false;
@@ -238,7 +321,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setAuthData(prev => ({
         ...prev,
         carregando: false,
-        erro: errorMessage
+        erro: errorMessage,
+        modoOffline: false
       }));
       
       // Verificar se o erro parece ser de conexão
@@ -250,6 +334,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         mensagemErro.includes('timeout')
       ) {
         toast.error('Falha na conexão com o servidor. Verifique sua internet e tente novamente.');
+        setAuthData(prev => ({
+          ...prev,
+          modoOffline: true
+        }));
       } else {
         toast.error(`Falha no login: ${errorMessage}`);
       }
@@ -269,7 +357,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         usuario: null,
         token: null,
         carregando: false,
-        erro: null
+        erro: null,
+        modoOffline: false
       });
       
       console.log('Logout realizado com sucesso');
@@ -390,6 +479,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         token: authData.token,
         carregando: authData.carregando,
         erro: authData.erro,
+        modoOffline: authData.modoOffline,
         login,
         logout,
         cadastrar,
