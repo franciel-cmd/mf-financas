@@ -375,6 +375,46 @@ export const verificarProblemaDNS = async (): Promise<boolean> => {
       }
     }
 
+    // Tentar verificar se podemos conectar diretamente via IP
+    if (dnsErrCount > 0 && baseURL.hostname === 'jtsbmolnhlrpyxccwpul.supabase.co') {
+      // Endereços IP do Supabase para teste direto (podem mudar, isso é apenas um exemplo)
+      const ipAddresses = ['104.18.8.118', '104.18.9.118'];
+      
+      let ipConnectionSuccess = false;
+      
+      for (const ip of ipAddresses) {
+        try {
+          console.log(`Tentando conexão direta via IP: ${ip}`);
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 3000);
+          
+          // Tentar acessar pelo IP (não vai funcionar completamente devido ao SSL/SNI,
+          // mas ajuda a testar se o problema é realmente de DNS)
+          await fetch(`https://${ip}`, {
+            method: 'HEAD',
+            mode: 'no-cors',
+            signal: controller.signal,
+            headers: {
+              'Host': baseURL.hostname // Importante para SNI
+            }
+          });
+          
+          clearTimeout(timeout);
+          ipConnectionSuccess = true;
+          console.log(`✅ Conexão via IP bem-sucedida para: ${ip}`);
+          break;
+        } catch (err) {
+          console.error(`❌ Falha ao conectar via IP ${ip}:`, err instanceof Error ? err.message : 'Erro desconhecido');
+        }
+      }
+      
+      // Se conseguir conectar via IP mas falhar com hostname, é quase certamente um problema de DNS
+      if (ipConnectionSuccess) {
+        console.error('Problema de DNS confirmado: consegue conectar via IP mas não via hostname');
+        return true;
+      }
+    }
+
     // Se conseguirmos resolver pelo menos um host, mas não o Supabase, 
     // provavelmente é um problema específico com o host do Supabase
     if (successCount > 0 && dnsErrCount > 0) {

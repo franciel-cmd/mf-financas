@@ -1,10 +1,12 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Outlet, NavLink } from 'react-router-dom';
 import { FiHome, FiFileText, FiBarChart2, FiCalendar, FiCheckCircle, FiAlertCircle, FiPlusCircle } from 'react-icons/fi';
 import styled from 'styled-components';
 import UserMenu from './UserMenu';
 import useAuth from '../hooks/useAuth';
 import OfflineAlert from './ui/OfflineAlert';
+import { testarConexaoSupabase } from '../services/supabase';
+import DNSHelperModal from './ui/DNSHelperModal';
 
 const LayoutContainer = styled.div`
   display: flex;
@@ -150,6 +152,19 @@ const OfflineStatusBar = styled.div`
 
 export default function Layout() {
   const { modoOffline } = useAuth();
+  const [dnsModalOpen, setDnsModalOpen] = useState(false);
+  
+  // Função para tentar reconectar
+  const tentarReconectar = async () => {
+    console.log('Tentando reconectar ao servidor...');
+    const resultado = await testarConexaoSupabase();
+    if (resultado) {
+      window.location.reload(); // Recarregar a página se a conexão for restabelecida
+    } else {
+      // Abrir modal de ajuda de DNS se falhar
+      setDnsModalOpen(true);
+    }
+  };
   
   return (
     <LayoutContainer>
@@ -206,9 +221,20 @@ export default function Layout() {
         </NavList>
       </Sidebar>
       <MainContent>
-        {modoOffline && <OfflineAlert fullWidth />}
+        {modoOffline && <OfflineAlert 
+          fullWidth 
+          onReconnect={tentarReconectar}
+          error="Não foi possível resolver o nome do servidor (ERR_NAME_NOT_RESOLVED). Isso geralmente indica um problema com seu DNS ou conexão de rede."
+        />}
         <Outlet />
       </MainContent>
+
+      {/* Modal de ajuda para DNS */}
+      <DNSHelperModal 
+        isOpen={dnsModalOpen} 
+        onClose={() => setDnsModalOpen(false)} 
+        dominio="jtsbmolnhlrpyxccwpul.supabase.co"
+      />
     </LayoutContainer>
   );
 } 
