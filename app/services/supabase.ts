@@ -23,6 +23,19 @@ console.log('Inicializando cliente Supabase...');
 console.log('URL:', supabaseUrl ? 'Definida' : 'Não definida');
 console.log('Chave:', supabaseAnonKey ? 'Definida' : 'Não definida');
 
+// Lista de servidores de desenvolvimento que devem ser ignorados nos erros de conexão
+const DEV_SERVERS = [
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'http://localhost:3006',
+  'http://127.0.0.1:3000'
+];
+
+// Verifica se a URL é um servidor de desenvolvimento local
+function isDevServer(url: string): boolean {
+  return DEV_SERVERS.some(server => url.startsWith(server));
+}
+
 // Verificar se há CORS habilitado (com tratamento de erro melhorado)
 try {
   console.log('Verificando CORS e conexão...');
@@ -74,6 +87,19 @@ const fetchWithRetry = async (input: RequestInfo | URL, init?: RequestInit, retr
       throw new Error('Aplicação em modo offline devido a problemas de conexão');
     }
     
+    // Ignorar erros para servidores de desenvolvimento
+    const url = typeof input === 'string' ? input : input.toString();
+    if (isDevServer(url)) {
+      console.log(`Ignorando erro para servidor de desenvolvimento: ${url}`);
+      // Para servidores de desenvolvimento, não tratamos falhas como críticas
+      try {
+        return await fetch(input, init);
+      } catch (error) {
+        console.warn(`Erro ao comunicar com servidor de desenvolvimento ${url} - isso é esperado em certas situações e não afeta o funcionamento do Supabase`);
+        throw error;
+      }
+    }
+    
     // Criar um controlador de aborto
     const controller = new AbortController();
     const { signal } = controller;
@@ -91,7 +117,6 @@ const fetchWithRetry = async (input: RequestInfo | URL, init?: RequestInit, retr
     
     // Log de depuração para ambientes de desenvolvimento
     if (isDevelopment) {
-      const url = typeof input === 'string' ? input : input.toString();
       debug(`Requisição para: ${url.split('?')[0]}`);
     }
     
@@ -119,6 +144,13 @@ const fetchWithRetry = async (input: RequestInfo | URL, init?: RequestInit, retr
     return response;
   } catch (error) {
     if (error instanceof Error) {
+      // Ignorar erros para servidores de desenvolvimento
+      const url = typeof input === 'string' ? input : input.toString();
+      if (isDevServer(url)) {
+        console.warn(`Erro ignorado para servidor de desenvolvimento: ${url}`);
+        throw error;
+      }
+      
       if (error.name === 'AbortError') {
         console.error(`Timeout na requisição após ${FETCH_TIMEOUT}ms`);
         errorLog('Timeout na requisição ao Supabase', {
@@ -220,6 +252,29 @@ export const testarConexaoSupabase = async (): Promise<boolean> => {
     const timeout = setTimeout(() => controller.abort(), 5000);
     
     try {
+      // Primeiro verificamos se o erro é com o servidor de desenvolvimento
+      // ou com o Supabase real
+      if (isReconnecting) {
+        console.log('Verificando se o erro é apenas com servidor de desenvolvimento...');
+        try {
+          for (const devServer of DEV_SERVERS) {
+            try {
+              // Tentativa rápida para verificar se o servidor de dev está respondendo
+              await fetch(`${devServer}/ping`, { 
+                method: 'HEAD',
+                signal: AbortSignal.timeout(1000)
+              });
+              console.log(`Servidor de desenvolvimento ${devServer} está respondendo`);
+            } catch (err) {
+              console.log(`Servidor de desenvolvimento ${devServer} não está respondendo - isso é esperado e não afeta o Supabase`);
+            }
+          }
+        } catch (err) {
+          console.warn('Erro ao verificar servidores de desenvolvimento', err);
+        }
+      }
+
+      // Agora verificamos o Supabase real
       const response = await fetch(`${supabaseUrl}/rest/v1/health?select=*`, {
         method: 'GET',
         headers: {

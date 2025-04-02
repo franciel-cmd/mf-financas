@@ -73,7 +73,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 usuario,
                 token,
                 carregando: false,
-                erro: 'Usando dados salvos localmente. Algumas funcionalidades podem estar limitadas.',
+                erro: null, // Não mostrar erro se temos dados locais
                 modoOffline: true
               }));
               console.log('Usando dados de autenticação salvos localmente devido a problemas de conexão.');
@@ -81,7 +81,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               localStorage.removeItem('@MFFinancas:auth');
               setAuthData(prev => ({
                 ...prev,
-                erro: 'Erro de conexão com o servidor. Verifique sua internet.',
+                erro: 'Falha ao conectar com o servidor. Os servidores podem estar em manutenção ou sua internet pode estar com problemas.',
                 carregando: false,
                 modoOffline: true
               }));
@@ -89,7 +89,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           } else {
             setAuthData(prev => ({
               ...prev,
-              erro: 'Erro de conexão com o servidor. Verifique sua internet.',
+              erro: 'Falha ao conectar com o servidor. Os servidores podem estar em manutenção ou sua internet pode estar com problemas.',
               carregando: false,
               modoOffline: true
             }));
@@ -119,14 +119,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               usuario,
               token,
               carregando: false,
-              erro: 'Usando dados salvos localmente. Algumas funcionalidades podem estar limitadas.',
+              erro: null, // Não mostrar erro se temos dados locais
               modoOffline: true
             }));
           } catch (e) {
             localStorage.removeItem('@MFFinancas:auth');
             setAuthData(prev => ({
               ...prev,
-              erro: 'Falha ao conectar com o servidor de autenticação',
+              erro: 'Falha ao conectar com o servidor. Tente novamente mais tarde.',
               carregando: false,
               modoOffline: true
             }));
@@ -134,7 +134,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         } else {
           setAuthData(prev => ({
             ...prev,
-            erro: 'Falha ao conectar com o servidor de autenticação',
+            erro: 'Falha ao conectar com o servidor. Tente novamente mais tarde.',
             carregando: false,
             modoOffline: true
           }));
@@ -420,7 +420,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           usuario: resposta.usuario,
           token: resposta.token,
           carregando: false,
-          erro: null
+          erro: null,
+          modoOffline: false
         });
         toast.success('Cadastro realizado com sucesso!');
         return true;
