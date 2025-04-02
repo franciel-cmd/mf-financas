@@ -86,7 +86,7 @@ const status = [
 ];
 
 export function FiltroConta() {
-  const { filtro, atualizarFiltro } = useFinancas();
+  const { filtro, aplicarFiltro } = useFinancas();
   const anoAtual = new Date().getFullYear();
   const anos = [anoAtual - 2, anoAtual - 1, anoAtual, anoAtual + 1];
   
@@ -94,9 +94,9 @@ export function FiltroConta() {
     const { name, value } = e.target;
     
     if (name === 'mes' || name === 'ano') {
-      atualizarFiltro({ [name]: value ? parseInt(value) : undefined });
+      aplicarFiltro({ [name]: value ? parseInt(value) : undefined });
     } else if (name === 'categoria' || name === 'status') {
-      atualizarFiltro({ 
+      aplicarFiltro({ 
         [name]: value ? value as CategoriaConta | StatusConta : undefined 
       });
     }
@@ -104,7 +104,7 @@ export function FiltroConta() {
   
   const handleLimparFiltro = () => {
     const hoje = new Date();
-    atualizarFiltro({
+    aplicarFiltro({
       mes: hoje.getMonth() + 1,
       ano: hoje.getFullYear(),
       categoria: undefined,
