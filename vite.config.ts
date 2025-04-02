@@ -26,7 +26,11 @@ export default defineConfig({
         manualChunks: {
           'vendor': ['react', 'react-dom', 'react-router-dom'],
           'ui': ['styled-components', 'react-icons'],
-          'utils': ['date-fns', 'zod']
+          'utils': ['date-fns', 'zod'],
+          'charts': ['jspdf'],
+          'data': ['exceljs'],
+          'supabase': ['@supabase/supabase-js'],
+          'forms': ['react-toastify']
         }
       }
     },
