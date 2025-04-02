@@ -94,10 +94,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Define carregando como true durante a verificação
       setAuthData(prev => ({ ...prev, carregando: true, erro: null }));
       
+      // Verificar conexão com o servidor antes de verificar autenticação
+      const conexaoOk = await testarConexaoSupabase();
+      if (!conexaoOk) {
+        throw new Error('Não foi possível conectar ao servidor. Verifique sua internet.');
+      }
+      
       const resposta = await verificarAutenticacao();
       console.log('Resposta de verificação de autenticação:', resposta ? 'Autenticado' : 'Não autenticado');
       
       if (resposta && typeof resposta === 'object' && 'usuario' in resposta && 'token' in resposta && resposta.usuario && resposta.token) {
+        // Salvar dados no localStorage para persistência
+        localStorage.setItem('@MFFinancas:auth', JSON.stringify({
+          usuario: resposta.usuario,
+          token: resposta.token
+        }));
+        
         setAuthData({
           usuario: resposta.usuario,
           token: resposta.token,
@@ -107,7 +119,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.log('Usuário autenticado:', resposta.usuario.email);
         return true;
       } else {
-        // Se não estiver autenticado, limpa os dados
+        // Limpar dados do localStorage se não estiver autenticado
+        localStorage.removeItem('@MFFinancas:auth');
+        
         setAuthData({
           usuario: null,
           token: null,
@@ -119,8 +133,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     } catch (error) {
       console.error('Erro ao verificar autenticação:', error);
-      // Em caso de erro, assume que não está autenticado
       const mensagemErro = error instanceof Error ? error.message : 'Erro ao verificar autenticação';
+      
+      // Em caso de erro de conexão, tentar recuperar dados do localStorage
+      if (mensagemErro.includes('conexão') || mensagemErro.includes('servidor')) {
+        const dadosSalvos = localStorage.getItem('@MFFinancas:auth');
+        if (dadosSalvos) {
+          try {
+            const { usuario, token } = JSON.parse(dadosSalvos);
+            setAuthData({
+              usuario,
+              token,
+              carregando: false,
+              erro: 'Usando dados salvos localmente. Algumas funcionalidades podem estar limitadas.'
+            });
+            return true;
+          } catch (e) {
+            localStorage.removeItem('@MFFinancas:auth');
+          }
+        }
+      }
+      
       setAuthData({
         usuario: null,
         token: null,
