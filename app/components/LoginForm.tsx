@@ -4,6 +4,8 @@ import useAuth from '../hooks/useAuth';
 import { toast } from 'react-toastify';
 import { debug } from '../utils/logger';
 import { Button } from './ui';
+import styled from 'styled-components';
+import { FiMail, FiLock, FiAlertTriangle, FiWifi, FiWifiOff } from 'react-icons/fi';
 
 const LoginForm: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -11,7 +13,7 @@ const LoginForm: React.FC = () => {
   const [tentativas, setTentativas] = useState(0);
   const [formValido, setFormValido] = useState(false);
 
-  const { login, carregando, erro, limparErro } = useAuth();
+  const { login, carregando, erro, limparErro, modoOffline } = useAuth();
   const navigate = useNavigate();
 
   // Validar formulário quando email ou senha mudarem
@@ -64,6 +66,20 @@ const LoginForm: React.FC = () => {
   return (
     <div className="max-w-md w-full p-6 bg-white rounded-lg shadow-lg">
       <h1 className="text-2xl font-bold text-center text-gray-800 mb-6">Login</h1>
+      
+      {modoOffline && (
+        <OfflineAlert>
+          <FiWifiOff size={18} />
+          <span>Modo offline ativo - algumas funcionalidades podem estar limitadas</span>
+        </OfflineAlert>
+      )}
+      
+      {erro && (
+        <ErrorMessage>
+          <FiAlertTriangle />
+          <span>{erro}</span>
+        </ErrorMessage>
+      )}
       
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
@@ -119,5 +135,45 @@ const LoginForm: React.FC = () => {
     </div>
   );
 };
+
+const OfflineAlert = styled.div`
+  display: flex;
+  align-items: center;
+  background-color: rgba(255, 193, 7, 0.15);
+  border-left: 3px solid #ffc107;
+  border-radius: 4px;
+  padding: 12px;
+  margin-bottom: 20px;
+  color: #856404;
+  
+  svg {
+    min-width: 18px;
+    margin-right: 12px;
+  }
+  
+  span {
+    font-size: 14px;
+  }
+`;
+
+const ErrorMessage = styled.div`
+  display: flex;
+  align-items: center;
+  background-color: rgba(255, 0, 0, 0.15);
+  border-left: 3px solid #ff0000;
+  border-radius: 4px;
+  padding: 12px;
+  margin-bottom: 20px;
+  color: #850000;
+  
+  svg {
+    min-width: 18px;
+    margin-right: 12px;
+  }
+  
+  span {
+    font-size: 14px;
+  }
+`;
 
 export default LoginForm; 

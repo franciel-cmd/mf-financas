@@ -3,6 +3,8 @@ import { Outlet, NavLink } from 'react-router-dom';
 import { FiHome, FiFileText, FiBarChart2, FiCalendar, FiCheckCircle, FiAlertCircle, FiPlusCircle } from 'react-icons/fi';
 import styled from 'styled-components';
 import UserMenu from './UserMenu';
+import useAuth from '../hooks/useAuth';
+import { OfflineAlert } from './ui';
 
 const LayoutContainer = styled.div`
   display: flex;
@@ -130,7 +132,25 @@ const NavSection = styled.div`
   }
 `;
 
+const OfflineStatusBar = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background-color: rgba(255, 193, 7, 0.15);
+  color: #856404;
+  padding: 10px 16px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  font-size: 14px;
+  
+  svg {
+    flex-shrink: 0;
+  }
+`;
+
 export default function Layout() {
+  const { modoOffline } = useAuth();
+  
   return (
     <LayoutContainer>
       <Sidebar>
@@ -186,6 +206,7 @@ export default function Layout() {
         </NavList>
       </Sidebar>
       <MainContent>
+        {modoOffline && <OfflineAlert fullWidth />}
         <Outlet />
       </MainContent>
     </LayoutContainer>
