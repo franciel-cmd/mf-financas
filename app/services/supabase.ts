@@ -247,6 +247,14 @@ export const testarConexaoSupabase = async (): Promise<boolean> => {
   try {
     console.log('Testando conexão com Supabase...');
     
+    // Testar se o problema é de DNS específicamente
+    const hostnameProblem = await verificarProblemaDNS();
+    if (hostnameProblem) {
+      console.error('Problema de DNS detectado ao tentar resolver o hostname do Supabase.');
+      errorLog('Problema de DNS detectado', { hostname: baseURL.hostname });
+      return false;
+    }
+    
     // Usar AbortController com timeout curto para não bloquear a UI
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
@@ -311,11 +319,78 @@ export const testarConexaoSupabase = async (): Promise<boolean> => {
       if (error.name === 'AbortError') {
         console.error('Timeout ao testar conexão com Supabase');
         errorLog('Timeout na verificação de conexão com Supabase');
+      } else if (error.name === 'TypeError' && error.message.includes('ERR_NAME_NOT_RESOLVED')) {
+        console.error('Erro de DNS ao conectar com Supabase:', error.message);
+        errorLog('Erro de DNS ao tentar resolver o hostname', { hostname: baseURL.hostname });
       } else {
         console.error('Erro ao testar conexão com Supabase:', error.message);
         errorLog('Falha na verificação de conexão com Supabase', error);
       }
     }
+    return false;
+  }
+};
+
+// Função para verificar exclusivamente problemas de DNS
+export const verificarProblemaDNS = async (): Promise<boolean> => {
+  try {
+    console.log('Verificando problemas de DNS...');
+    // Lista de hostnames para testar se conseguimos resolver nomes em geral
+    const testHosts = [
+      'www.google.com',
+      'www.cloudflare.com',
+      baseURL.hostname // O próprio hostname do Supabase
+    ];
+
+    let dnsErrCount = 0;
+    let successCount = 0;
+
+    // Testar cada host
+    for (const host of testHosts) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 2000);
+        
+        await fetch(`https://${host}/favicon.ico`, {
+          method: 'HEAD',
+          mode: 'no-cors', // Apenas para testar conectividade
+          signal: controller.signal,
+          cache: 'no-cache'
+        });
+        
+        clearTimeout(timeout);
+        successCount++;
+        console.log(`✅ DNS resolve teste bem-sucedido para: ${host}`);
+      } catch (err) {
+        if (err instanceof Error) {
+          if (err.message.includes('ERR_NAME_NOT_RESOLVED')) {
+            console.error(`❌ Falha ao resolver DNS para: ${host}`);
+            dnsErrCount++;
+          } else if (host === baseURL.hostname) {
+            // Se falhar com o host do Supabase, mesmo que não seja erro de DNS específico,
+            // ainda é importante identificar
+            console.error(`❌ Falha ao conectar com: ${host} - ${err.message}`);
+          }
+        }
+      }
+    }
+
+    // Se conseguirmos resolver pelo menos um host, mas não o Supabase, 
+    // provavelmente é um problema específico com o host do Supabase
+    if (successCount > 0 && dnsErrCount > 0) {
+      console.error('Problema de DNS detectado - pode resolver alguns hosts mas não todos');
+      return true;
+    }
+    
+    // Se não conseguirmos resolver nenhum host, é um problema geral de DNS
+    if (successCount === 0 && dnsErrCount > 0) {
+      console.error('Problema grave de DNS detectado - não consegue resolver nenhum hostname');
+      return true;
+    }
+    
+    return false;
+  } catch (error) {
+    console.error('Erro ao testar problemas de DNS:', error);
     return false;
   }
 };

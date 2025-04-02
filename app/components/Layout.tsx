@@ -4,7 +4,7 @@ import { FiHome, FiFileText, FiBarChart2, FiCalendar, FiCheckCircle, FiAlertCirc
 import styled from 'styled-components';
 import UserMenu from './UserMenu';
 import useAuth from '../hooks/useAuth';
-import { OfflineAlert } from './ui';
+import OfflineAlert from './ui/OfflineAlert';
 
 const LayoutContainer = styled.div`
   display: flex;
